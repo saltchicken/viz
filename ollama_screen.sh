@@ -5,6 +5,7 @@ IMG_PATH="/tmp/ollama-shot-$(date +%s).png"
 B64_PATH="${IMG_PATH}.b64"
 JSON_PATH="${IMG_PATH}.json"
 RESP_PATH="${IMG_PATH}.resp.json"
+CHAT_LOG="${IMG_PATH}.chat.txt" # New: File to store the visible chat history
 
 # 1. Select region and capture
 grim -g "$(slurp)" "$IMG_PATH" || exit 1
@@ -43,15 +44,14 @@ fi
 # 3. Convert image to Base64
 base64 -w 0 "$IMG_PATH" >"$B64_PATH"
 
-# --- NEW CONVERSATIONAL LOGIC START ---
-
-# Initialize an empty JSON array to hold the conversation history
 MESSAGES='[]'
 FIRST_TURN=true
 
 while true; do
+  # Log the user's prompt to the visible UI chat log
+  echo -e "=== You ===\n$PROMPT\n" >>"$CHAT_LOG"
+
   if [ "$FIRST_TURN" = true ]; then
-    # First turn: attach the image to the user's message
     MESSAGES=$(jq -n \
       --argjson msgs "$MESSAGES" \
       --arg prompt "$PROMPT" \
@@ -59,25 +59,13 @@ while true; do
       '$msgs + [{"role": "user", "content": $prompt, "images": [$img]}]')
     FIRST_TURN=false
   else
-    # Subsequent turns: Ask for follow-up question
-    PROMPT=$(zenity --entry \
-      --title="Ollama Vision - Chat" \
-      --text="Follow-up question (Leave blank or Cancel to exit):" \
-      --width=500)
-
-    # Exit the loop if the user cancels or submits an empty string
-    if [ -z "$PROMPT" ]; then
-      break
-    fi
-
-    # Add the new text-only message to the history
     MESSAGES=$(jq -n \
       --argjson msgs "$MESSAGES" \
       --arg prompt "$PROMPT" \
       '$msgs + [{"role": "user", "content": $prompt}]')
   fi
 
-  # 4. Build JSON payload safely using jq and the /api/chat format
+  # 4. Build JSON payload
   jq -n \
     --arg model "$MODEL" \
     --argjson messages "$MESSAGES" \
@@ -104,23 +92,27 @@ while true; do
 
   wait $CURL_PID
 
-  # 7. Extract the response (Chat API nests this under .message.content)
+  # 7. Extract the response
   RESPONSE=$(jq -r '.message.content' <"$RESP_PATH")
 
-  # 8. Add Ollama's response to the conversation history so it remembers context
+  # Log Ollama's response to the visible UI chat log
+  echo -e "=== Ollama ===\n$RESPONSE\n\n----------------------------------------\n" >>"$CHAT_LOG"
+
+  # 8. Add Ollama's response to the API context history
   MESSAGES=$(jq -n \
     --argjson msgs "$MESSAGES" \
     --arg resp "$RESPONSE" \
     '$msgs + [{"role": "assistant", "content": $resp}]')
 
-  # 9. Output to clipboard
+  # 9. Output ONLY the latest response to clipboard
   echo -n "$RESPONSE" | wl-copy
 
-  # 10. Display the final result with a button to continue
-  echo "$RESPONSE" | zenity --text-info \
-    --title="Ollama Response" \
+  # 10. Display the full chat log
+  cat "$CHAT_LOG" | zenity --text-info \
+    --title="Ollama Chat History" \
     --width=800 \
     --height=600 \
+    --auto-scroll \
     --ok-label="Next Question" \
     --cancel-label="End Chat"
 
@@ -129,7 +121,17 @@ while true; do
     break
   fi
 
+  # Prompt for the next question
+  PROMPT=$(zenity --entry \
+    --title="Ollama Vision - Chat" \
+    --text="Follow-up question (Leave blank or Cancel to exit):" \
+    --width=500)
+
+  if [ -z "$PROMPT" ]; then
+    break
+  fi
+
 done
 
-# 11. Cleanup all temporary files upon exiting
-rm -f "$IMG_PATH" "$B64_PATH" "$JSON_PATH" "$RESP_PATH"
+# 11. Cleanup all temporary files (including the chat log)
+rm -f "$IMG_PATH" "$B64_PATH" "$JSON_PATH" "$RESP_PATH" "$CHAT_LOG"
