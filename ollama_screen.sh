@@ -9,15 +9,38 @@ RESP_PATH="${IMG_PATH}.resp.json"
 # 1. Select region and capture
 grim -g "$(slurp)" "$IMG_PATH" || exit 1
 
-# 2. Prompt for user input using Zenity
-PROMPT=$(zenity --entry \
+# 2. Prompt for user input using Zenity with predetermined options
+CHOICE=$(zenity --list \
   --title="Ollama Vision" \
-  --text="Ask Ollama about this screenshot:" \
-  --width=500)
+  --text="Select a predetermined prompt or choose 'Custom':" \
+  --radiolist \
+  --column="Select" --column="Prompt" \
+  FALSE "Describe this image in detail." \
+  FALSE "Extract all the text from this image." \
+  FALSE "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt." \
+  TRUE "Custom" \
+  --width=500 --height=300)
 
-if [ -z "$PROMPT" ]; then
+if [ -z "$CHOICE" ]; then
+  # User canceled or closed the dialog
   rm -f "$IMG_PATH"
   exit 0
+fi
+
+if [ "$CHOICE" = "Custom" ]; then
+  # Prompt for custom user input if they selected "Custom"
+  PROMPT=$(zenity --entry \
+    --title="Ollama Vision - Custom Prompt" \
+    --text="Ask Ollama about this screenshot:" \
+    --width=500)
+
+  if [ -z "$PROMPT" ]; then
+    rm -f "$IMG_PATH"
+    exit 0
+  fi
+else
+  # Use the selected predetermined prompt
+  PROMPT="$CHOICE"
 fi
 
 # 3. Convert image to Base64 and save to a file
