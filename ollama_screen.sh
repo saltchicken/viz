@@ -8,8 +8,11 @@ JSON_PATH="${IMG_PATH}.json"
 # 1. Select region and capture
 grim -g "$(slurp)" "$IMG_PATH" || exit 1
 
-# 2. Prompt for user input
-PROMPT=$(echo "" | wofi --show dmenu --prompt "Ask Ollama:" --lines 1)
+# 2. Prompt for user input using Zenity
+PROMPT=$(zenity --entry \
+  --title="Ollama Vision" \
+  --text="Ask Ollama about this screenshot:" \
+  --width=500)
 
 if [ -z "$PROMPT" ]; then
   rm -f "$IMG_PATH"
@@ -19,10 +22,10 @@ fi
 # 3. Notify user that generation has started
 notify-send -u low "Ollama" "Thinking: '$PROMPT'..."
 
-# 4. Convert image to Base64 and save to a file (bypasses ARG_MAX limit)
+# 4. Convert image to Base64 and save to a file
 base64 -w 0 "$IMG_PATH" >"$B64_PATH"
 
-# 5. Build JSON payload safely using jq and save to a file
+# 5. Build JSON payload safely using jq
 jq -n \
   --arg model "$MODEL" \
   --arg prompt "$PROMPT" \
