@@ -23,7 +23,7 @@ from textual_image.widget import Image as TextualImage
 from viz.config import config
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
-from viz.services import stream_ollama_chat
+from viz.services import stream_ollama_chat_async
 from viz.widgets import ChatMessage
 
 PRESETS = [
@@ -45,11 +45,7 @@ class OllamaVisionApp(App):
 
     BINDINGS = [
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
-        # ("ctrl+g", "capture", "Capture Region"),
-        # ("ctrl+v", "paste_image", "Paste Image"),
-        # ("ctrl+f", "add_file", "Add File"),
         ("ctrl+o", "toggle_layout", "Toggle Layout"),
-        # ("ctrl+r", "reset_chat", "Reset Chat"),
         ("ctrl+q", "quit", "Quit"),
     ]
 
@@ -364,8 +360,9 @@ class OllamaVisionApp(App):
         self.query_one("#prompt-input", TextArea).clear()
         self.query_one("#preset-select", Select).value = "Custom"
 
-    @work(thread=True)
-    def stream_ollama_response(self, system_prompt: str = "") -> None:
+    @work
+    async def stream_ollama_response(self, system_prompt: str = "") -> None:
+        """Native asyncio task running in the Textual event loop."""
         worker = get_current_worker()
         
         # Filter out internal tracking keys (like '_source_paths') 
@@ -378,18 +375,17 @@ class OllamaVisionApp(App):
         if system_prompt.strip():
             messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
 
-        for chunk, error_msg in stream_ollama_chat(self.model,
-                                                   messages_snapshot):
+        async for chunk, error_msg in stream_ollama_chat_async(self.model, messages_snapshot):
             if worker.is_cancelled:
                 return
             if error_msg:
-                self.call_from_thread(self.handle_stream_error, error_msg)
+                self.handle_stream_error(error_msg)
                 return
             if chunk:
-                self.call_from_thread(self.handle_stream_chunk, chunk)
+                self.handle_stream_chunk(chunk)
 
         if not worker.is_cancelled:
-            self.call_from_thread(self.handle_stream_complete)
+            self.handle_stream_complete()
 
     def handle_stream_chunk(self, chunk: str) -> None:
         if self.streaming_msg_widget is None:

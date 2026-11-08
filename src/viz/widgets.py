@@ -1,5 +1,6 @@
 import re
 import subprocess
+import time
 
 from textual import on
 from textual.app import ComposeResult
@@ -54,6 +55,10 @@ class ChatMessage(Vertical):
         self.streaming = streaming
         self._streaming_md: Markdown | None = None
         self._status_label: Static | None = None
+        
+        # State to prevent O(N^2) Markdown widget parsing freeze during high-frequency streaming
+        self._last_md_update: float = 0.0
+        self._update_throttle: float = 0.1  # Update markdown at most every 100ms
 
     def compose(self) -> ComposeResult:
         prefix_md, prefix_raw = self._get_role_prefixes()
@@ -106,7 +111,7 @@ class ChatMessage(Vertical):
                 yield Markdown(chunk, classes="md-chunk")
 
     def append_chunk(self, chunk: str) -> None:
-        """Appends a streamed token chunk and updates the active view."""
+        """Appends a streamed token chunk and safely throttles markdown updates."""
         if self._status_label is not None:
             self._status_label.remove()
             self._status_label = None
@@ -114,44 +119,57 @@ class ChatMessage(Vertical):
         self.raw_text += chunk
         prefix_md, prefix_raw = self._get_role_prefixes()
 
-        if self._streaming_md is not None:
-            self._streaming_md.update(f"{prefix_md}{self.raw_text}")
+        # Update the raw text view immediately (very cheap operation)
         self.raw_view.update(f"{prefix_raw}{self.raw_text}")
+        
+        # Throttle updates to the Markdown view to avoid quadratic CPU blocking
+        if self._streaming_md is not None:
+            now = time.monotonic()
+            if now - self._last_md_update > self._update_throttle:
+                self._streaming_md.update(f"{prefix_md}{self.raw_text}")
+                self._last_md_update = now
 
     def finalize_stream(self) -> None:
-        """Finalizes streaming and renders copy buttons if code blocks are present."""
+        """Finalizes streaming, forces a final render, and mounts copy buttons if needed."""
         self.streaming = False
         if self._status_label is not None:
             self._status_label.remove()
             self._status_label = None
 
-        # Only rebuild the Markdown container if there are fenced code blocks to attach Copy buttons to
-        if "```" in self.raw_text:
-            prefix_md, _ = self._get_role_prefixes()
-            md_container = self.query_one(".md-view-container", Vertical)
-            md_container.remove_children()
-            self._streaming_md = None
+        prefix_md, _ = self._get_role_prefixes()
 
-            chunks = re.split(r"(```.*?```)", self.raw_text, flags=re.DOTALL)
-            if chunks:
-                chunks[0] = prefix_md + chunks[0]
+        # If there are no code blocks, we can just do one final update to catch
+        # any chunks that were held back by the throttle.
+        if "```" not in self.raw_text:
+            if self._streaming_md is not None:
+                self._streaming_md.update(f"{prefix_md}{self.raw_text}")
+            return
 
-            for chunk in chunks:
-                if not chunk.strip():
-                    continue
-                if self._is_code_block(chunk):
-                    wrapper = Vertical(classes="code-wrapper")
-                    md_container.mount(wrapper)
-                    wrapper.mount(Markdown(chunk, classes="md-chunk"))
-                    wrapper.mount(
-                        CopyCodeButton(
-                            self._extract_inner_code(chunk),
-                            label="📋",
-                            classes="copy-code-btn inline-copy-btn",
-                            variant="primary",
-                        ))
-                else:
-                    md_container.mount(Markdown(chunk, classes="md-chunk"))
+        # Otherwise, tear down and rebuild the Markdown container for copy buttons
+        md_container = self.query_one(".md-view-container", Vertical)
+        md_container.remove_children()
+        self._streaming_md = None
+
+        chunks = re.split(r"(```.*?```)", self.raw_text, flags=re.DOTALL)
+        if chunks:
+            chunks[0] = prefix_md + chunks[0]
+
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            if self._is_code_block(chunk):
+                wrapper = Vertical(classes="code-wrapper")
+                md_container.mount(wrapper)
+                wrapper.mount(Markdown(chunk, classes="md-chunk"))
+                wrapper.mount(
+                    CopyCodeButton(
+                        self._extract_inner_code(chunk),
+                        label="📋",
+                        classes="copy-code-btn inline-copy-btn",
+                        variant="primary",
+                    ))
+            else:
+                md_container.mount(Markdown(chunk, classes="md-chunk"))
 
     @staticmethod
     def _is_code_block(chunk: str) -> bool:

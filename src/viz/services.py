@@ -1,5 +1,5 @@
 import base64
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from datetime import datetime
 import json
 import math
@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 
 from PIL import Image
-import requests
+import httpx
 
 from viz.config import config
 
@@ -148,9 +148,9 @@ class ImageWorkspace:
             return False
 
 
-def query_ollama_chat(model: str,
-                      messages: list[dict],
-                      timeout: int = config.ollama.chat_timeout) -> tuple[str, str | None]:
+async def query_ollama_chat_async(model: str,
+                                  messages: list[dict],
+                                  timeout: int = config.ollama.chat_timeout) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
     payload = {
         "model": model,
@@ -158,56 +158,57 @@ def query_ollama_chat(model: str,
         "stream": False,
     }
     try:
-        resp = requests.post(f"{config.ollama.base_url}/api/chat",
-                             json=payload,
-                             timeout=timeout)
-        data = resp.json()
-        error_msg = data.get("error")
-        content = data.get("message", {}).get("content", "")
-        return content, error_msg
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(f"{config.ollama.base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            error_msg = data.get("error")
+            content = data.get("message", {}).get("content", "")
+            return content, error_msg
     except Exception as e:
         return "", f"No response or connection timed out: {e}"
 
 
-def stream_ollama_chat(
+async def stream_ollama_chat_async(
     model: str,
     messages: list[dict],
     timeout: int = config.ollama.chat_timeout,
-) -> Iterator[tuple[str, str | None]]:
-    """Streams a chat request from Ollama, yielding (token_chunk, error_message)."""
+) -> AsyncIterator[tuple[str, str | None]]:
+    """Streams a chat request from Ollama natively, yielding (token_chunk, error_message)."""
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
     }
     try:
-        with requests.post(
-                f"{config.ollama.base_url}/api/chat",
-                json=payload,
-                stream=True,
-                timeout=timeout,
-        ) as resp:
-            if resp.status_code != 200:
-                try:
-                    err = resp.json().get("error", resp.text)
-                except Exception:
-                    err = f"HTTP {resp.status_code}: {resp.text}"
-                yield "", err
-                return
-
-            for line in resp.iter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                if error_msg := data.get("error"):
-                    yield "", error_msg
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                    "POST",
+                    f"{config.ollama.base_url}/api/chat",
+                    json=payload,
+            ) as resp:
+                if resp.status_code != 200:
+                    await resp.aread()
+                    try:
+                        err = resp.json().get("error", resp.text)
+                    except Exception:
+                        err = f"HTTP {resp.status_code}: {resp.text}"
+                    yield "", err
                     return
 
-                chunk = data.get("message", {}).get("content", "")
-                if chunk:
-                    yield chunk, None
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if error_msg := data.get("error"):
+                        yield "", error_msg
+                        return
 
-                if data.get("done"):
-                    break
+                    chunk = data.get("message", {}).get("content", "")
+                    if chunk:
+                        yield chunk, None
+
+                    if data.get("done"):
+                        break
     except Exception as e:
         yield "", f"No response or connection timed out: {e}"

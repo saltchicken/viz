@@ -1,7 +1,7 @@
 import shutil
 import sys
 
-import requests
+import httpx
 
 from viz.config import config
 
@@ -23,7 +23,7 @@ def _check_system_binaries() -> None:
 
 def _check_ollama_server() -> None:
     try:
-        r = requests.get(config.ollama.base_url, timeout=config.ollama.status_timeout)
+        r = httpx.get(config.ollama.base_url, timeout=config.ollama.status_timeout)
         r.raise_for_status()
     except Exception:
         sys.exit(
@@ -34,7 +34,7 @@ def _check_ollama_server() -> None:
 def _check_model_installed(model: str) -> None:
     check_model = model if ":" in model else f"{model}:latest"
     try:
-        tags_resp = requests.get(f"{config.ollama.base_url}/api/tags",
+        tags_resp = httpx.get(f"{config.ollama.base_url}/api/tags",
                                  timeout=config.ollama.status_timeout).json()
         installed = [m.get("name") for m in tags_resp.get("models", [])]
         if check_model not in installed:
