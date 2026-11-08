@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import shlex
 from pathlib import Path
 
 from textual import on
@@ -536,6 +537,34 @@ class OllamaVisionApp(App):
 
         chat_scroll.scroll_end(animate=True)
 
+    def _is_command_secure(self, command: str) -> tuple[bool, str, list[str]]:
+        """Parses the command for vulnerabilities and checks against the allowlist."""
+        if not command.strip():
+            return False, "Command is empty.", []
+
+        # 1. Parse command to securely tokenize arguments
+        try:
+            parsed_cmd = shlex.split(command)
+        except ValueError as e:
+            return False, f"Malformed command string: {e}", []
+
+        if not parsed_cmd:
+            return False, "Command resolved to empty after parsing.", []
+
+        base_cmd = parsed_cmd[0]
+
+        # 2. Check against the configured allowlist
+        if base_cmd not in config.app.allowed_commands:
+            return False, f"Command '{base_cmd}' is not in the allowed list.", []
+
+        # 3. Check for shell injection vulnerabilities
+        forbidden_chars = [";", "&", "|", "`", "$", "<", ">"]
+        for char in forbidden_chars:
+            if char in command:
+                return False, f"Command contains forbidden shell operator: '{char}'. Chaining and piping are disabled.", []
+
+        return True, "", parsed_cmd
+
     @on(Button.Pressed, "#btn-accept-cmd")
     async def on_accept_cmd(self, event: Button.Pressed) -> None:
         approval_widget = None
@@ -547,18 +576,44 @@ class OllamaVisionApp(App):
         if not approval_widget or approval_widget.has_class("resolved"):
             return
 
+        tool_call = approval_widget.tool_call
+        command = approval_widget.command
+
+        # -- NEW SECURITY CHECK --
+        is_secure, error_msg, parsed_cmd = self._is_command_secure(command)
+        if not is_secure:
+            approval_widget.add_class("resolved")
+            for btn in approval_widget.query(Button):
+                btn.disabled = True
+            
+            self.notify(f"Security Blocked: {error_msg}", severity="error")
+            self.messages.append({
+                "role": "tool",
+                "content": f"Security Policy Violation: {error_msg}",
+            })
+            
+            chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
+            self._mount_chat_message(
+                f"**Command Blocked (Security):**\n```\n{error_msg}\n```",
+                role="tool",
+                css_class="tool-msg",
+                animate=False,
+            )
+            approval_widget.remove()
+            self._trigger_ollama_turn()
+            return
+
+        # Mark as resolved
         approval_widget.add_class("resolved")
         for btn in approval_widget.query(Button):
             btn.disabled = True
 
-        tool_call = approval_widget.tool_call
-        command = approval_widget.command
-
         self.notify(f"Running: {command}")
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
+            # Shifted to create_subprocess_exec for defense-in-depth
+            proc = await asyncio.create_subprocess_exec(
+                *parsed_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )

@@ -13,6 +13,7 @@ else:
 class AppSettings:
     default_model: str = "qwen3.8:27b"
     required_commands: list[str] = field(default_factory=lambda: ["grim", "slurp", "wl-paste"])
+    allowed_commands: list[str] = field(default_factory=lambda: ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"])
 
 
 @dataclass

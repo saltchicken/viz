@@ -1,6 +1,7 @@
 [app]
 default_model = "qwen3.8:27b"
 required_commands = ["grim", "slurp", "wl-paste"]
+allowed_commands = ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"]
 
 [ollama]
 base_url = "http://localhost:11434"
@@ -28,7 +29,6 @@ prompt = "Extract all the text from this image."
 [[presets]]
 name = "Nonesense"
 prompt = "A test"
-
 
 [[presets]]
 name = "Create FLUX3 Prompt"
