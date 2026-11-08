@@ -6,19 +6,19 @@ MODEL="${1:-qwen3.8:27b}"
 # 2. Dependency Checks
 for cmd in grim slurp yad jq curl wl-copy base64 mktemp; do
   if ! command -v "$cmd" &>/dev/null; then
-    yad --center --image=dialog-error --title="Missing Dependency" --text="Required command '$cmd' is not installed." --button="OK!gtk-ok:0"
+    yad --center --title="Missing Dependency" --text="Required command '$cmd' is not installed." --button="OK:0"
     exit 1
   fi
 done
 
 if ! command -v magick &>/dev/null && ! command -v convert &>/dev/null; then
-  yad --center --image=dialog-error --title="Missing Dependency" --text="ImageMagick is required for UI scaling.\nPlease install 'imagemagick'." --button="OK!gtk-ok:0"
+  yad --center --title="Missing Dependency" --text="ImageMagick is required for UI scaling.\nPlease install 'imagemagick'." --button="OK:0"
   exit 1
 fi
 
 # 3. Check if Ollama is running
 if ! curl -s --connect-timeout 2 http://localhost:11434 >/dev/null; then
-  yad --center --image=dialog-error --title="Ollama Not Found" --text="Ollama is not running on localhost:11434.\nPlease start the Ollama server and try again." --button="OK!gtk-ok:0"
+  yad --center --title="Ollama Not Found" --text="Ollama is not running on localhost:11434.\nPlease start the Ollama server and try again." --button="OK:0"
   exit 1
 fi
 
@@ -77,10 +77,10 @@ while true; do
     --field="Select Preset:CB" "$PRESETS" \
     --field="Custom Prompt (Multiline):TXT" "$CURRENT_CUSTOM" \
     --width=700 --height=600 \
-    --button="Capture Image!gtk-add:2" \
-    --button="Clear Images!gtk-clear:3" \
-    --button="Cancel!gtk-cancel:1" \
-    --button="Ask Ollama!gtk-ok:0")
+    --button="Capture Image:2" \
+    --button="Clear Images:3" \
+    --button="Cancel:1" \
+    --button="Ask Ollama:0")
 
   RET=$?
 
@@ -115,7 +115,7 @@ else
 fi
 
 if [ -z "$PROMPT" ]; then
-  yad --center --image=dialog-error --title="Error" --text="Prompt cannot be empty." --button="OK!gtk-ok:0"
+  yad --center --title="Error" --text="Prompt cannot be empty." --button="OK:0"
   exit 1
 fi
 
@@ -173,13 +173,12 @@ while true; do
   curl -s --max-time 180 http://localhost:11434/api/chat -d @"$JSON_PATH" >"$RESP_PATH" &
   CURL_PID=$!
 
-  # Static Processing Indicator (No Progress Bar)
+  # Static Processing Indicator (No Progress Bar, No Icon)
   yad --title="Ollama Vision" \
     --center --borders=20 \
-    --image="system-run" \
     --text="<big><b>Thinking...</b></big>\n\nPlease wait while the model generates a response.\n\n<i>'${PROMPT:0:50}...'</i>" \
     --width=450 \
-    --button="Cancel!gtk-cancel:1" &
+    --button="Cancel:1" &
   YAD_PID=$!
 
   # Wait loop: continues as long as BOTH processes are still running
@@ -208,12 +207,12 @@ while true; do
   fi
 
   if [ -n "$ERROR_MSG" ]; then
-    yad --center --image=dialog-error --title="Ollama Error" --text="API Error: $ERROR_MSG" --button="OK!gtk-ok:0"
+    yad --center --title="Ollama Error" --text="API Error: $ERROR_MSG" --button="OK:0"
     break
   fi
 
   if [ -z "$RESPONSE" ]; then
-    yad --center --image=dialog-error --title="Ollama Error" --text="Received empty response from the model." --button="OK!gtk-ok:0"
+    yad --center --title="Ollama Error" --text="Received empty response from the model." --button="OK:0"
     break
   fi
 
@@ -233,8 +232,8 @@ while true; do
     --title="Ollama Vision Chat ($MODEL)" \
     --filename="$CHAT_LOG" \
     --width=800 --height=600 --wrap \
-    --button="End Chat!gtk-quit:1" \
-    --button="Next Question!gtk-go-forward:0"
+    --button="End Chat:1" \
+    --button="Next Question:0"
 
   if [ $? -ne 0 ]; then
     break
@@ -248,7 +247,7 @@ while true; do
     --separator="|||" \
     --field=":TXT" "" \
     --width=600 --height=350 \
-    --button="End Chat!gtk-quit:1" --button="Ask!gtk-ok:0")
+    --button="End Chat:1" --button="Ask:0")
 
   if [ $? -ne 0 ] || [ -z "$NEXT_DATA" ]; then
     break
