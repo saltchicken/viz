@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from textual import on
@@ -9,6 +10,7 @@ from textual.widgets import Button
 from textual.widgets import DirectoryTree
 from textual.widgets import Label
 from textual.widgets import Static
+from textual.widgets import TextArea
 
 
 class FileSelectModal(ModalScreen[list[Path]]):
@@ -52,3 +54,27 @@ class FileSelectModal(ModalScreen[list[Path]]):
     @on(Button.Pressed, "#add-btn")
     def on_add(self) -> None:
         self.dismiss(self.selected_files)
+
+
+class DebugModal(ModalScreen[None]):
+    """Modal dialog to show raw API request payload."""
+
+    def __init__(self, payload: dict) -> None:
+        super().__init__()
+        self.payload = payload
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="debug-dialog"):
+            yield Label("[b]Last Request Payload (Images Truncated)[/b]")
+            yield TextArea(
+                json.dumps(self.payload, indent=2),
+                language="json",
+                read_only=True,
+                id="debug-textarea"
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Close", id="close-debug-btn", variant="primary")
+
+    @on(Button.Pressed, "#close-debug-btn")
+    def on_close(self) -> None:
+        self.dismiss()

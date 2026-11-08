@@ -167,3 +167,22 @@ FileSelectModal {
 FileSelectModal Button {
     margin-left: 1;
 }
+
+/* DebugModal */
+DebugModal {
+    align: center middle;
+}
+
+#debug-dialog {
+    width: 80%;
+    height: 80%;
+    border: thick $warning;
+    background: $surface;
+    padding: 1 2;
+}
+
+#debug-textarea {
+    height: 1fr;
+    margin: 1 0;
+    border: solid $secondary;
+}

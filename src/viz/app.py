@@ -22,6 +22,7 @@ from textual.worker import Worker
 from textual_image.widget import Image as TextualImage
 
 from viz.config import config
+from viz.modals import DebugModal
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
@@ -47,6 +48,7 @@ class OllamaVisionApp(App):
     BINDINGS = [
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
         ("ctrl+o", "toggle_layout", "Toggle Layout"),
+        ("ctrl+1", "show_debug", "Debug API"),
         ("ctrl+q", "quit", "Quit"),
     ]
 
@@ -61,6 +63,7 @@ class OllamaVisionApp(App):
         self.active_worker: Worker | None = None
         self.streaming_msg_widget: ChatMessage | None = None
         self.last_user_msg_widget: ChatMessage | None = None
+        self.last_api_payload: dict = {}
 
         # 0: Split View, 1: Prep Panel Only, 2: Chat Panel Only
         self.layout_mode = 0
@@ -108,7 +111,7 @@ class OllamaVisionApp(App):
 
             with Horizontal(classes="btn-row"):
                 yield Button(
-                    "Ask Ollama",
+                    "Ask Ollama (Ctrl+S)",
                     id="btn-ask",
                     variant="success",
                 )
@@ -384,6 +387,21 @@ class OllamaVisionApp(App):
 
         if system_prompt.strip():
             messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
+            
+        # Prepare the truncated debug payload so it doesn't freeze the UI rendering huge base64 strings
+        debug_messages = []
+        for msg in messages_snapshot:
+            debug_msg = {k: v for k, v in msg.items() if k != "images"}
+            if "images" in msg:
+                debug_msg["images"] = [f"<base64 data, length: {len(b64)}>" for b64 in msg["images"]]
+            debug_messages.append(debug_msg)
+            
+        self.last_api_payload = {
+            "model": self.model,
+            "messages": debug_messages,
+            "options": {"num_ctx": num_ctx},
+            "stream": True,
+        }
 
         ollama_options = {"num_ctx": num_ctx}
 
@@ -481,6 +499,13 @@ class OllamaVisionApp(App):
             chat_panel.display = True
             chat_panel.styles.width = "100%"
             self.notify("Layout: Chat Panel Only")
+            
+    def action_show_debug(self) -> None:
+        """Shows the raw API payload of the last request."""
+        if not self.last_api_payload:
+            self.notify("No requests have been sent yet.", severity="warning")
+            return
+        self.push_screen(DebugModal(self.last_api_payload))
 
     def cleanup(self) -> None:
         self.workspace.cleanup()
