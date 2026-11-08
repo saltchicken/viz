@@ -27,6 +27,7 @@ class OllamaVisionApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("ctrl+s", "ask_ollama", "Ask / Send"),
+        ("f2", "toggle_layout", "Toggle Layout"),
     ]
 
     def __init__(self, model: str) -> None:
@@ -39,6 +40,9 @@ class OllamaVisionApp(App):
         self.first_turn = True
         self.active_worker = None
         self.thinking_modal: ThinkingModal | None = None
+        
+        # 0: Split View, 1: Prep Panel Only, 2: Chat Panel Only
+        self.layout_mode = 0 
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -262,6 +266,35 @@ class OllamaVisionApp(App):
         self.messages.append({"role": "assistant", "content": content})
         self._mount_chat_message(content, role="assistant", css_class="assistant-msg", animate=True)
         self.notify("Response received.")
+
+    def action_toggle_layout(self) -> None:
+        """Cycles through 3 layout modes: Split -> Prep Only -> Chat Only."""
+        self.layout_mode = (self.layout_mode + 1) % 3
+        
+        prep_panel = self.query_one("#prep-panel", Vertical)
+        chat_panel = self.query_one("#chat-panel", Vertical)
+
+        if self.layout_mode == 0:
+            # Split View: Show both, remove inline width overrides to let CSS take over
+            prep_panel.display = True
+            chat_panel.display = True
+            prep_panel.styles.width = None
+            chat_panel.styles.width = None
+            self.notify("Layout: Split View")
+            
+        elif self.layout_mode == 1:
+            # Prep Panel Only: Hide chat, force prep to 100% width
+            prep_panel.display = True
+            chat_panel.display = False
+            prep_panel.styles.width = "100%"
+            self.notify("Layout: Prep Panel Only")
+            
+        else:
+            # Chat Panel Only: Hide prep, force chat to 100% width
+            prep_panel.display = False
+            chat_panel.display = True
+            chat_panel.styles.width = "100%"
+            self.notify("Layout: Chat Panel Only")
 
     def cleanup(self) -> None:
         self.workspace.cleanup()
