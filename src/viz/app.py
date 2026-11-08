@@ -101,7 +101,7 @@ class OllamaVisionApp(App):
             )
             
             yield Label("Context Size:")
-            yield Input(value="2048", type="integer", id="ctx-input")
+            yield Input(value="32768", type="integer", id="ctx-input")
 
             yield Label("Prompt (Multiline):", id="prompt-label")
             yield TextArea(id="prompt-input")
