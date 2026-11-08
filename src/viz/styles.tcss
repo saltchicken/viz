@@ -167,22 +167,3 @@ FileSelectModal {
 FileSelectModal Button {
     margin-left: 1;
 }
-
-/* ThinkingModal */
-ThinkingModal {
-    align: center middle;
-}
-
-#thinking-box {
-    width: 60;
-    height: auto;
-    border: heavy $accent;
-    background: $surface;
-    padding: 2;
-    align: center middle;
-}
-
-#thinking-text {
-    text-align: center;
-    margin-bottom: 2;
-}

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -53,27 +52,3 @@ class FileSelectModal(ModalScreen[list[Path]]):
     @on(Button.Pressed, "#add-btn")
     def on_add(self) -> None:
         self.dismiss(self.selected_files)
-
-
-class ThinkingModal(ModalScreen[bool]):
-    """Modal shown while waiting for Ollama, supporting request cancellation."""
-
-    def __init__(self, prompt_snippet: str) -> None:
-        super().__init__()
-        self.prompt_snippet = prompt_snippet
-
-    def compose(self) -> ComposeResult:
-        # FIX: Escape the snippet to prevent Rich markup parsing errors
-        snippet = escape(self.prompt_snippet[:50])
-        with Vertical(id="thinking-box"):
-            yield Static(
-                f"[b]Thinking...[/b]\n\n"
-                f"Please wait while the model generates a response.\n\n"
-                f"[i]'{snippet}...'[/i]",
-                id="thinking-text",
-            )
-            yield Button("Cancel Request", id="cancel-req-btn", variant="error")
-
-    @on(Button.Pressed, "#cancel-req-btn")
-    def cancel_request(self) -> None:
-        self.dismiss(False)
