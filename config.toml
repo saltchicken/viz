@@ -1,0 +1,35 @@
+[app]
+default_model = "qwen3.8:27b"
+required_commands = ["grim", "slurp", "wl-paste"]
+
+[ollama]
+base_url = "http://localhost:11434"
+chat_timeout = 180
+status_timeout = 2
+
+[preview]
+max_width = 400
+max_height = 400
+margin = 8
+bg_color = "#1e1e2e"
+
+[[presets]]
+name = "Custom"
+prompt = "Custom"
+
+[[presets]]
+name = "Describe this image in detail."
+prompt = "Describe this image in detail."
+
+[[presets]]
+name = "Extract all the text from this image."
+prompt = "Extract all the text from this image."
+
+[[presets]]
+name = "Nonesense"
+prompt = "A test"
+
+
+[[presets]]
+name = "Create FLUX3 Prompt"
+prompt = "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt."

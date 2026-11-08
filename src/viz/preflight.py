@@ -3,9 +3,7 @@ import sys
 
 import requests
 
-from viz.services import OLLAMA_BASE_URL
-
-REQUIRED_COMMANDS = ["grim", "slurp", "wl-paste"]
+from viz.config import config
 
 
 def run_preflight_checks(model: str) -> None:
@@ -16,7 +14,7 @@ def run_preflight_checks(model: str) -> None:
 
 
 def _check_system_binaries() -> None:
-    for cmd in REQUIRED_COMMANDS:
+    for cmd in config.app.required_commands:
         if not shutil.which(cmd):
             sys.exit(
                 f"[Missing Dependency] Required command '{cmd}' is not installed."
@@ -25,7 +23,7 @@ def _check_system_binaries() -> None:
 
 def _check_ollama_server() -> None:
     try:
-        r = requests.get(OLLAMA_BASE_URL, timeout=2)
+        r = requests.get(config.ollama.base_url, timeout=config.ollama.status_timeout)
         r.raise_for_status()
     except Exception:
         sys.exit(
@@ -36,8 +34,8 @@ def _check_ollama_server() -> None:
 def _check_model_installed(model: str) -> None:
     check_model = model if ":" in model else f"{model}:latest"
     try:
-        tags_resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags",
-                                 timeout=2).json()
+        tags_resp = requests.get(f"{config.ollama.base_url}/api/tags",
+                                 timeout=config.ollama.status_timeout).json()
         installed = [m.get("name") for m in tags_resp.get("models", [])]
         if check_model not in installed:
             sys.exit(

@@ -1,13 +1,12 @@
 import sys
 
 from viz.app import OllamaVisionApp
+from viz.config import config
 from viz.preflight import run_preflight_checks
-
-DEFAULT_MODEL = "qwen3.8:27b"
 
 
 def main() -> None:
-    target_model = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
+    target_model = sys.argv[1] if len(sys.argv) > 1 else config.app.default_model
     run_preflight_checks(target_model)
 
     app = OllamaVisionApp(target_model)

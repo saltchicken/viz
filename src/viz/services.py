@@ -11,7 +11,7 @@ import tempfile
 from PIL import Image
 import requests
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+from viz.config import config
 
 
 class ImageWorkspace:
@@ -41,8 +41,9 @@ class ImageWorkspace:
             return png_files[0]
 
         images = [Image.open(p) for p in png_files]
-        max_w, max_h = 400, 400
-        margin = 8
+        max_w = config.preview.max_width
+        max_h = config.preview.max_height
+        margin = config.preview.margin
 
         # Resize images, keeping aspect ratio
         processed_images = []
@@ -62,8 +63,7 @@ class ImageWorkspace:
         canvas_w = cols * cell_w + (cols + 1) * margin
         canvas_h = rows * cell_h + (rows + 1) * margin
 
-        # Hex #1e1e2e is used to match Textual's typical dark theme backgrounds
-        canvas = Image.new("RGB", (canvas_w, canvas_h), color="#1e1e2e")
+        canvas = Image.new("RGB", (canvas_w, canvas_h), color=config.preview.bg_color)
 
         for idx, img in enumerate(processed_images):
             row = idx // cols
@@ -150,7 +150,7 @@ class ImageWorkspace:
 
 def query_ollama_chat(model: str,
                       messages: list[dict],
-                      timeout: int = 180) -> tuple[str, str | None]:
+                      timeout: int = config.ollama.chat_timeout) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
     payload = {
         "model": model,
@@ -158,7 +158,7 @@ def query_ollama_chat(model: str,
         "stream": False,
     }
     try:
-        resp = requests.post(f"{OLLAMA_BASE_URL}/api/chat",
+        resp = requests.post(f"{config.ollama.base_url}/api/chat",
                              json=payload,
                              timeout=timeout)
         data = resp.json()
@@ -172,7 +172,7 @@ def query_ollama_chat(model: str,
 def stream_ollama_chat(
     model: str,
     messages: list[dict],
-    timeout: int = 180,
+    timeout: int = config.ollama.chat_timeout,
 ) -> Iterator[tuple[str, str | None]]:
     """Streams a chat request from Ollama, yielding (token_chunk, error_message)."""
     payload = {
@@ -182,7 +182,7 @@ def stream_ollama_chat(
     }
     try:
         with requests.post(
-                f"{OLLAMA_BASE_URL}/api/chat",
+                f"{config.ollama.base_url}/api/chat",
                 json=payload,
                 stream=True,
                 timeout=timeout,

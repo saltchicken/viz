@@ -19,6 +19,7 @@ from textual.worker import get_current_worker
 from textual.worker import Worker
 from textual_image.widget import Image as TextualImage
 
+from viz.config import config
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat
@@ -88,7 +89,7 @@ class OllamaVisionApp(App):
 
             yield Label("Select Preset:")
             yield Select(
-                PRESETS,
+                config.presets,
                 value="Custom",
                 id="preset-select",
                 allow_blank=False,
