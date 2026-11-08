@@ -30,25 +30,6 @@ from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
 from viz.widgets import ChatMessage, CommandApproval
 
-# Define the tool capability
-COMMAND_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "execute_command",
-        "description": "Executes a shell command on the user's system. Use this when you need to inspect files, run scripts, or perform system operations.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The bash shell command to execute."
-                }
-            },
-            "required": ["command"]
-        }
-    }
-}
-
 PRESETS = [
     ("Custom", "Custom"),
     ("Describe this image in detail.", "Describe this image in detail."),
@@ -88,6 +69,33 @@ class OllamaVisionApp(App):
 
         # "prep" or "chat"
         self.view = "prep"
+
+    def _get_command_tool(self) -> dict:
+        """Dynamically builds the tool payload including the current allowlist."""
+        allowed_list = ", ".join(config.app.allowed_commands)
+        
+        return {
+            "type": "function",
+            "function": {
+                "name": "execute_command",
+                "description": (
+                    "Executes a shell command on the user's system. "
+                    f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
+                    "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
+                    "Chaining and redirection are completely disabled and will cause the command to fail."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The exact command to execute (e.g., 'ls -la' or 'cat file.txt')."
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
+        }
 
     def compose(self) -> ComposeResult:
         yield from self._compose_prep_panel()
@@ -440,7 +448,7 @@ class OllamaVisionApp(App):
                 debug_msg["images"] = [f"<base64 data, length: {len(b64)}>" for b64 in msg["images"]]
             debug_messages.append(debug_msg)
 
-        tools = [COMMAND_TOOL] if enable_tools else None
+        tools = [self._get_command_tool()] if enable_tools else None
         self.last_api_payload = {
             "model": self.model,
             "messages": debug_messages,
