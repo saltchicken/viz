@@ -220,7 +220,7 @@ class OllamaVisionApp(App):
     }
     #preview-image {
         height: 14;
-        width: 100%;
+        width: auto;
         border: dashed $secondary;
         margin-bottom: 1;
     }
