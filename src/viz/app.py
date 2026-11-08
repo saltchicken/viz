@@ -89,11 +89,11 @@ class OllamaVisionApp(App):
         self.layout_mode = 0
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        # yield Header()
         with Horizontal(id="main-split"):
             yield from self._compose_prep_panel()
             yield from self._compose_chat_panel()
-        yield Footer()
+        # yield Footer()
 
     def _compose_prep_panel(self) -> ComposeResult:
         with Vertical(id="prep-panel"):
