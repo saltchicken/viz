@@ -86,6 +86,13 @@ class OllamaVisionApp(App):
             with Horizontal(classes="btn-row"):
                 yield Button("Add File", id="btn-add-file")
                 yield Button("Clear", id="btn-clear", variant="warning")
+                
+            yield Label("System Message:")
+            yield Select(
+                config.system_presets,
+                id="system-select",
+                allow_blank=True,
+            )
 
             yield Label("Select Preset:")
             yield Select(
@@ -232,6 +239,9 @@ class OllamaVisionApp(App):
 
         for hint in self.query("#empty-chat-hint"):
             hint.remove()
+            
+        raw_sys_val = self.query_one("#system-select", Select).value
+        system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
 
         self.messages.append(self._build_user_message(prompt))
         self.last_user_msg_widget = self._mount_chat_message(
@@ -250,7 +260,7 @@ class OllamaVisionApp(App):
             streaming=True,
         )
         self._set_streaming_ui_state(True)
-        self.active_worker = self.stream_ollama_response()
+        self.active_worker = self.stream_ollama_response(system_prompt=system_prompt)
 
     def action_cancel_stream(self) -> None:
         """Cancels an in-progress streaming request."""
@@ -342,10 +352,13 @@ class OllamaVisionApp(App):
         self.query_one("#preset-select", Select).value = "Custom"
 
     @work(thread=True)
-    def stream_ollama_response(self) -> None:
+    def stream_ollama_response(self, system_prompt: str = "") -> None:
         worker = get_current_worker()
         # Pass a shallow copy of messages so background iteration is thread-safe
         messages_snapshot = list(self.messages)
+
+        if system_prompt.strip():
+            messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
 
         for chunk, error_msg in stream_ollama_chat(self.model,
                                                    messages_snapshot):

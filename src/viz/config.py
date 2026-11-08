@@ -38,6 +38,9 @@ class Config:
     presets: list[tuple[str, str]] = field(default_factory=lambda: [
         ("Custom", "Custom")
     ])
+    system_presets: list[tuple[str, str]] = field(default_factory=lambda: [
+        ("None", "")
+    ])
 
     @classmethod
     def load(cls, path: str = "config.toml") -> "Config":
@@ -56,8 +59,19 @@ class Config:
         presets = [(p.get("name", "Custom"), p.get("prompt", "Custom")) for p in presets_data]
         if not presets:
             presets = cls().presets
+            
+        sys_presets_data = data.get("system_presets", [])
+        system_presets = [(p.get("name", "None"), p.get("prompt", "")) for p in sys_presets_data]
+        if not system_presets:
+            system_presets = cls().system_presets
 
-        return cls(app=app, ollama=ollama, preview=preview, presets=presets)
+        return cls(
+            app=app, 
+            ollama=ollama, 
+            preview=preview, 
+            presets=presets,
+            system_presets=system_presets
+        )
 
 
 # Global configuration instance
