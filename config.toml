@@ -1,7 +1,7 @@
 [app]
 default_model = "qwen3.8:27b"
 required_commands = ["grim", "slurp", "wl-paste"]
-allowed_commands = ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"]
+allowed_commands = ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc", "context"]
 
 [ollama]
 base_url = "http://localhost:11434"
