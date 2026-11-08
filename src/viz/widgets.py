@@ -1,9 +1,12 @@
 import re
 import subprocess
+
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Button, Markdown, Static
+from textual.widgets import Button
+from textual.widgets import Markdown
+from textual.widgets import Static
 
 
 class CopyCodeButton(Button):
@@ -16,6 +19,17 @@ class CopyCodeButton(Button):
 
 class ChatMessage(Vertical):
     """A container holding both Markdown and Raw text views."""
+
+    DEFAULT_CSS = """
+    .code-wrapper {
+        height: auto;
+    }
+    .code-wrapper .inline-copy-btn {
+        dock: right;
+        margin-top: 1;
+        margin-right: 1;
+    }
+    """
 
     def __init__(
         self,
@@ -37,7 +51,6 @@ class ChatMessage(Vertical):
         with Vertical(classes="md-view-container"):
             yield from self._compose_markdown_chunks(prefix_md)
 
-        # FIX: Added markup=False so code/JSON brackets aren't parsed as rich tags
         self.raw_view = Static(f"{prefix_raw}{self.raw_text}", markup=False)
         yield self.raw_view
 
@@ -56,13 +69,14 @@ class ChatMessage(Vertical):
                 continue
 
             if self._is_code_block(chunk):
-                yield Markdown(chunk, classes="md-chunk")
-                yield CopyCodeButton(
-                    self._extract_inner_code(chunk),
-                    label="📋",
-                    classes="copy-code-btn inline-copy-btn",
-                    variant="primary",
-                )
+                with Vertical(classes="code-wrapper"):
+                    yield Markdown(chunk, classes="md-chunk")
+                    yield CopyCodeButton(
+                        self._extract_inner_code(chunk),
+                        label="📋",
+                        classes="copy-code-btn inline-copy-btn",
+                        variant="primary",
+                    )
             else:
                 yield Markdown(chunk, classes="md-chunk")
 
@@ -94,7 +108,9 @@ class ChatMessage(Vertical):
             self.app.notify(f"Copied {label} to clipboard!")
         except Exception:
             try:
-                subprocess.run(["wl-copy"], input=text.encode("utf-8"), check=True)
+                subprocess.run(["wl-copy"],
+                               input=text.encode("utf-8"),
+                               check=True)
                 self.app.notify(f"Copied {label} via wl-copy!")
             except Exception as e:
                 self.app.notify(f"Clipboard error: {e}", severity="error")

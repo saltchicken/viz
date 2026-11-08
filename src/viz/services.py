@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+
 import requests
 
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -19,7 +20,8 @@ class ImageWorkspace:
         self.preview_path = self.tmp_dir / "preview.png"
 
     def get_attached_images(self) -> list[Path]:
-        return sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        return sorted(self.img_dir.glob("*.png"),
+                      key=lambda p: p.stat().st_mtime)
 
     def get_encoded_images(self) -> list[str]:
         return [
@@ -102,7 +104,9 @@ class ImageWorkspace:
         return res.returncode == 0
 
 
-def query_ollama_chat(model: str, messages: list[dict], timeout: int = 180) -> tuple[str, str | None]:
+def query_ollama_chat(model: str,
+                      messages: list[dict],
+                      timeout: int = 180) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
     payload = {
         "model": model,
@@ -110,7 +114,9 @@ def query_ollama_chat(model: str, messages: list[dict], timeout: int = 180) -> t
         "stream": False,
     }
     try:
-        resp = requests.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload, timeout=timeout)
+        resp = requests.post(f"{OLLAMA_BASE_URL}/api/chat",
+                             json=payload,
+                             timeout=timeout)
         data = resp.json()
         error_msg = data.get("error")
         content = data.get("message", {}).get("content", "")

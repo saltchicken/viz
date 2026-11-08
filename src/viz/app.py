@@ -1,20 +1,35 @@
 # src/viz/app.py
 from pathlib import Path
-from textual import on, work
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Label, Select, Static, Switch, TextArea
+
+from textual import on
+from textual import work
+from textual.app import App
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.containers import Vertical
+from textual.containers import VerticalScroll
+from textual.widgets import Button
+from textual.widgets import Footer
+from textual.widgets import Header
+from textual.widgets import Label
+from textual.widgets import Select
+from textual.widgets import Static
+from textual.widgets import Switch
+from textual.widgets import TextArea
 from textual.worker import get_current_worker
 from textual_image.widget import Image as TextualImage
 
-from viz.modals import FileSelectModal, ThinkingModal
-from viz.services import ImageWorkspace, query_ollama_chat
+from viz.modals import FileSelectModal
+from viz.modals import ThinkingModal
+from viz.services import ImageWorkspace
+from viz.services import query_ollama_chat
 from viz.widgets import ChatMessage
 
 PRESETS = [
     ("Custom", "Custom"),
     ("Describe this image in detail.", "Describe this image in detail."),
-    ("Extract all the text from this image.", "Extract all the text from this image."),
+    ("Extract all the text from this image.",
+     "Extract all the text from this image."),
     (
         "Create FLUX3 Prompt",
         "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt.",
@@ -41,9 +56,9 @@ class OllamaVisionApp(App):
         self.first_turn = True
         self.active_worker = None
         self.thinking_modal: ThinkingModal | None = None
-        
+
         # 0: Split View, 1: Prep Panel Only, 2: Chat Panel Only
-        self.layout_mode = 0 
+        self.layout_mode = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -66,19 +81,26 @@ class OllamaVisionApp(App):
                 yield Button("Clear", id="btn-clear", variant="warning")
 
             yield Label("Select Preset:")
-            yield Select(PRESETS, value="Custom", id="preset-select", allow_blank=False)
+            yield Select(PRESETS,
+                         value="Custom",
+                         id="preset-select",
+                         allow_blank=False)
 
             yield Label("Prompt (Multiline):", id="prompt-label")
             yield TextArea(id="prompt-input")
 
             with Horizontal(classes="btn-row"):
-                yield Button("Ask Ollama (Ctrl+S)", id="btn-ask", variant="success")
+                yield Button("Ask Ollama (Ctrl+S)",
+                             id="btn-ask",
+                             variant="success")
                 yield Button("Reset Chat", id="btn-reset", variant="error")
 
     def _compose_chat_panel(self) -> ComposeResult:
         with Vertical(id="chat-panel"):
             with Horizontal(id="chat-header"):
-                yield Label("Conversation History", id="chat-header-title", classes="section-title")
+                yield Label("Conversation History",
+                            id="chat-header-title",
+                            classes="section-title")
                 with Horizontal(id="toggle-container"):
                     yield Label("Raw")
                     yield Switch(value=True, id="view-toggle")
@@ -106,7 +128,9 @@ class OllamaVisionApp(App):
         img_widget = self.query_one("#preview-image", TextualImage)
 
         if count == 0:
-            state_label.update("Images Attached: [b]0[/b] — Click 'Capture', 'Paste', or 'Add File'")
+            state_label.update(
+                "Images Attached: [b]0[/b] — Click 'Capture', 'Paste', or 'Add File'"
+            )
             img_widget.image = None
             img_widget.display = False
             self.sub_title = "0 images attached"
@@ -171,8 +195,8 @@ class OllamaVisionApp(App):
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         chat_scroll.remove_children()
         chat_scroll.mount(
-            Static("Chat reset. Attach images and ask a question.", id="empty-chat-hint")
-        )
+            Static("Chat reset. Attach images and ask a question.",
+                   id="empty-chat-hint"))
         self.query_one("#prompt-label", Label).update("Prompt (Multiline):")
         self.notify("Conversation history cleared.")
 
@@ -187,13 +211,17 @@ class OllamaVisionApp(App):
             hint.remove()
 
         self.messages.append(self._build_user_message(prompt))
-        user_msg_widget = self._mount_chat_message(prompt, role="user", css_class="user-msg", animate=False)
+        user_msg_widget = self._mount_chat_message(prompt,
+                                                   role="user",
+                                                   css_class="user-msg",
+                                                   animate=False)
         self._reset_prompt_inputs()
 
         self.thinking_modal = ThinkingModal(prompt)
         self.push_screen(
             self.thinking_modal,
-            lambda completed: self._on_thinking_modal_closed(completed, user_msg_widget),
+            lambda completed: self._on_thinking_modal_closed(
+                completed, user_msg_widget),
         )
         self.active_worker = self.fetch_ollama_response()
 
@@ -214,9 +242,11 @@ class OllamaVisionApp(App):
             self.query_one("#prompt-label", Label).update("Follow-up Question:")
         return msg_entry
 
-    def _mount_chat_message(
-        self, text: str, role: str, css_class: str, animate: bool = True
-    ) -> ChatMessage:
+    def _mount_chat_message(self,
+                            text: str,
+                            role: str,
+                            css_class: str,
+                            animate: bool = True) -> ChatMessage:
         is_markdown = self.query_one("#view-toggle", Switch).value
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         widget = ChatMessage(
@@ -234,9 +264,8 @@ class OllamaVisionApp(App):
         self.query_one("#prompt-input", TextArea).clear()
         self.query_one("#preset-select", Select).value = "Custom"
 
-    def _on_thinking_modal_closed(
-        self, completed_normally: bool | None, user_msg_widget: ChatMessage
-    ) -> None:
+    def _on_thinking_modal_closed(self, completed_normally: bool | None,
+                                  user_msg_widget: ChatMessage) -> None:
         if completed_normally is False and self.active_worker:
             self.active_worker.cancel()
             if self.messages and self.messages[-1]["role"] == "user":
@@ -261,17 +290,21 @@ class OllamaVisionApp(App):
             return
 
         if not content:
-            self.notify("Received empty response from the model.", severity="error")
+            self.notify("Received empty response from the model.",
+                        severity="error")
             return
 
         self.messages.append({"role": "assistant", "content": content})
-        self._mount_chat_message(content, role="assistant", css_class="assistant-msg", animate=True)
+        self._mount_chat_message(content,
+                                 role="assistant",
+                                 css_class="assistant-msg",
+                                 animate=True)
         self.notify("Response received.")
 
     def action_toggle_layout(self) -> None:
         """Cycles through 3 layout modes: Split -> Prep Only -> Chat Only."""
         self.layout_mode = (self.layout_mode + 1) % 3
-        
+
         prep_panel = self.query_one("#prep-panel", Vertical)
         chat_panel = self.query_one("#chat-panel", Vertical)
 
@@ -282,14 +315,14 @@ class OllamaVisionApp(App):
             prep_panel.styles.width = None
             chat_panel.styles.width = None
             self.notify("Layout: Split View")
-            
+
         elif self.layout_mode == 1:
             # Prep Panel Only: Hide chat, force prep to 100% width
             prep_panel.display = True
             chat_panel.display = False
             prep_panel.styles.width = "100%"
             self.notify("Layout: Prep Panel Only")
-            
+
         else:
             # Chat Panel Only: Hide prep, force chat to 100% width
             prep_panel.display = False

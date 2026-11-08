@@ -1,10 +1,15 @@
 from pathlib import Path
+
 from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DirectoryTree, Label, Static
+from textual.widgets import Button
+from textual.widgets import DirectoryTree
+from textual.widgets import Label
+from textual.widgets import Static
 
 
 class FileSelectModal(ModalScreen[list[Path]]):
@@ -16,7 +21,8 @@ class FileSelectModal(ModalScreen[list[Path]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-dialog"):
-            yield Label("[b]Select Image(s)[/b] (Click files to toggle selection)")
+            yield Label(
+                "[b]Select Image(s)[/b] (Click files to toggle selection)")
             yield DirectoryTree(Path.home(), id="file-tree")
             yield Static("Selected: 0 files", id="selected-label")
             with Horizontal(classes="modal-buttons"):
@@ -37,7 +43,8 @@ class FileSelectModal(ModalScreen[list[Path]]):
     def _update_selection_label(self) -> None:
         names = ", ".join(p.name for p in self.selected_files)
         count = len(self.selected_files)
-        self.query_one("#selected-label", Static).update(f"Selected ({count}): {names}")
+        self.query_one("#selected-label",
+                       Static).update(f"Selected ({count}): {names}")
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel(self) -> None:

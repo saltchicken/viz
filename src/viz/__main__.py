@@ -1,4 +1,5 @@
 import sys
+
 from viz.app import OllamaVisionApp
 from viz.preflight import run_preflight_checks
 
