@@ -173,18 +173,30 @@ while true; do
   curl -s --max-time 180 http://localhost:11434/api/chat -d @"$JSON_PATH" >"$RESP_PATH" &
   CURL_PID=$!
 
-  # Pulsating Progress
-  while kill -0 $CURL_PID 2>/dev/null; do
-    sleep 0.2
-  done | yad --progress \
-    --center --borders=15 \
-    --title="Ollama Vision" \
-    --text="\n<b>Thinking...</b>\n<i>'${PROMPT:0:50}...'</i>\n" \
-    --pulsate --auto-close --auto-kill \
+  # Static Processing Indicator (No Progress Bar)
+  yad --title="Ollama Vision" \
+    --center --borders=20 \
+    --image="system-run" \
+    --text="<big><b>Thinking...</b></big>\n\nPlease wait while the model generates a response.\n\n<i>'${PROMPT:0:50}...'</i>" \
     --width=450 \
-    --button="Cancel!gtk-cancel:1"
+    --button="Cancel!gtk-cancel:1" &
+  YAD_PID=$!
 
-  wait $CURL_PID
+  # Wait loop: continues as long as BOTH processes are still running
+  while kill -0 $CURL_PID 2>/dev/null && kill -0 $YAD_PID 2>/dev/null; do
+    sleep 0.2
+  done
+
+  # Cleanup based on which process ended first
+  if ! kill -0 $YAD_PID 2>/dev/null; then
+    # User clicked Cancel (dialog closed before curl finished)
+    kill $CURL_PID 2>/dev/null
+  else
+    # Curl finished successfully, so we close the dialog
+    kill $YAD_PID 2>/dev/null
+  fi
+
+  wait $CURL_PID 2>/dev/null
 
   # Validate
   if [ -s "$RESP_PATH" ]; then
