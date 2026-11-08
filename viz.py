@@ -266,9 +266,12 @@ class OllamaVisionApp(App):
     def on_mount(self) -> None:
         self.update_preview()
 
+    def get_attached_images(self) -> list[Path]:
+        """Return attached images sorted chronologically by when they were added."""
+        return sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+
     def update_preview(self) -> None:
-        # Sort by modification time so images appear in the exact order they were added
-        png_files = sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        png_files = self.get_attached_images()
         count = len(png_files)
         state_label = self.query_one("#preview-state", Static)
         img_widget = self.query_one("#preview-image", TextualImage)
@@ -410,8 +413,7 @@ class OllamaVisionApp(App):
         # Build message payload
         msg_entry: dict = {"role": "user", "content": prompt}
         if self.first_turn:
-            # Sort by modification time so they are sent to Ollama in the correct order
-            png_files = sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+            png_files = self.get_attached_images()
             if png_files:
                 b64_images = [
                     base64.b64encode(p.read_bytes()).decode("utf-8")
@@ -492,15 +494,12 @@ class OllamaVisionApp(App):
         # Save to history
         self.messages.append({"role": "assistant", "content": content})
 
-        # Copy response to Wayland clipboard automatically
-        subprocess.run(["wl-copy"], input=content.encode("utf-8"), stderr=subprocess.DEVNULL)
-
         # Render Markdown in Chat UI
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         assistant_md = Markdown(f"**Ollama ({self.model}):**\n\n{content}", classes="assistant-msg")
         chat_scroll.mount(assistant_md)
         chat_scroll.scroll_end(animate=True)
-        self.notify("Response received and copied to clipboard.")
+        self.notify("Response received.")
 
     def cleanup(self) -> None:
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -509,7 +508,7 @@ class OllamaVisionApp(App):
 def run_preflight_checks(model: str) -> None:
     """Replicates steps 2, 3, and 3b of viz.sh before launching the TUI."""
     # 2. Dependency Checks
-    required_cmds = ["grim", "slurp", "wl-copy", "wl-paste"]
+    required_cmds = ["grim", "slurp", "wl-paste"]
     for cmd in required_cmds:
         if not shutil.which(cmd):
             sys.exit(f"[Missing Dependency] Required command '{cmd}' is not installed.")
