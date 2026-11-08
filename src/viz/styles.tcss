@@ -1,3 +1,23 @@
+/* Override global theme variables */
+
+/*
+    $primary: #cba6f7;
+    $primary-darken-1: #b4befe;
+
+    $success: #a6e3a1;
+    $warning: #f9e2af;
+    $error: #f38ba8;
+
+    $surface: #313244;
+    $surface-lighten-1: #45475a;
+
+App {
+    background: #1e1e2e;
+    color: #cdd6f4;
+}
+
+*/
+
 /* Main Application Layout */
 #main-split {
     height: 1fr;
