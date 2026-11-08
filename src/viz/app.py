@@ -11,6 +11,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Button
 from textual.widgets import Footer
 from textual.widgets import Header
+from textual.widgets import Input
 from textual.widgets import Label
 from textual.widgets import Select
 from textual.widgets import Static
@@ -98,6 +99,9 @@ class OllamaVisionApp(App):
                 id="preset-select",
                 allow_blank=False,
             )
+            
+            yield Label("Context Size:")
+            yield Input(value="2048", type="integer", id="ctx-input")
 
             yield Label("Prompt (Multiline):", id="prompt-label")
             yield TextArea(id="prompt-input")
@@ -240,6 +244,9 @@ class OllamaVisionApp(App):
         raw_sys_val = self.query_one("#system-select", Select).value
         system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
 
+        ctx_val = self.query_one("#ctx-input", Input).value
+        num_ctx = int(ctx_val) if ctx_val.isdigit() else 2048
+
         self.messages.append(self._build_user_message(prompt))
         self.last_user_msg_widget = self._mount_chat_message(
             prompt,
@@ -257,7 +264,10 @@ class OllamaVisionApp(App):
             streaming=True,
         )
         self._set_streaming_ui_state(True)
-        self.active_worker = self.stream_ollama_response(system_prompt=system_prompt)
+        self.active_worker = self.stream_ollama_response(
+            system_prompt=system_prompt,
+            num_ctx=num_ctx
+        )
 
     def action_cancel_stream(self) -> None:
         """Cancels an in-progress streaming request."""
@@ -361,7 +371,7 @@ class OllamaVisionApp(App):
         self.query_one("#preset-select", Select).value = "Custom"
 
     @work
-    async def stream_ollama_response(self, system_prompt: str = "") -> None:
+    async def stream_ollama_response(self, system_prompt: str = "", num_ctx: int = 2048) -> None:
         """Native asyncio task running in the Textual event loop."""
         worker = get_current_worker()
         
@@ -375,7 +385,13 @@ class OllamaVisionApp(App):
         if system_prompt.strip():
             messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
 
-        async for chunk, error_msg in stream_ollama_chat_async(self.model, messages_snapshot):
+        ollama_options = {"num_ctx": num_ctx}
+
+        async for chunk, error_msg, metrics in stream_ollama_chat_async(
+            self.model, 
+            messages_snapshot, 
+            options=ollama_options
+        ):
             if worker.is_cancelled:
                 return
             if error_msg:
@@ -383,6 +399,15 @@ class OllamaVisionApp(App):
                 return
             if chunk:
                 self.handle_stream_chunk(chunk)
+            if metrics:
+                p_count = metrics.get("prompt_eval_count", 0)
+                e_count = metrics.get("eval_count", 0)
+                total = p_count + e_count
+                self.notify(
+                    f"Prompt: {p_count} | Response: {e_count} | Total: {total}", 
+                    title="Token Usage", 
+                    timeout=5
+                )
 
         if not worker.is_cancelled:
             self.handle_stream_complete()

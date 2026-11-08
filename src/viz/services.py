@@ -148,15 +148,21 @@ class ImageWorkspace:
             return False
 
 
-async def query_ollama_chat_async(model: str,
-                                  messages: list[dict],
-                                  timeout: int = config.ollama.chat_timeout) -> tuple[str, str | None]:
+async def query_ollama_chat_async(
+    model: str,
+    messages: list[dict],
+    options: dict | None = None,
+    timeout: int = config.ollama.chat_timeout
+) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
     }
+    if options:
+        payload["options"] = options
+
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(f"{config.ollama.base_url}/api/chat", json=payload)
@@ -172,14 +178,18 @@ async def query_ollama_chat_async(model: str,
 async def stream_ollama_chat_async(
     model: str,
     messages: list[dict],
+    options: dict | None = None,
     timeout: int = config.ollama.chat_timeout,
-) -> AsyncIterator[tuple[str, str | None]]:
-    """Streams a chat request from Ollama natively, yielding (token_chunk, error_message)."""
+) -> AsyncIterator[tuple[str, str | None, dict | None]]:
+    """Streams a chat request from Ollama natively, yielding (token_chunk, error_message, metrics)."""
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
     }
+    if options:
+        payload["options"] = options
+
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
@@ -193,7 +203,7 @@ async def stream_ollama_chat_async(
                         err = resp.json().get("error", resp.text)
                     except Exception:
                         err = f"HTTP {resp.status_code}: {resp.text}"
-                    yield "", err
+                    yield "", err, None
                     return
 
                 async for line in resp.aiter_lines():
@@ -201,14 +211,19 @@ async def stream_ollama_chat_async(
                         continue
                     data = json.loads(line)
                     if error_msg := data.get("error"):
-                        yield "", error_msg
+                        yield "", error_msg, None
                         return
 
                     chunk = data.get("message", {}).get("content", "")
-                    if chunk:
-                        yield chunk, None
+                    is_done = data.get("done", False)
+                    
+                    # Ollama only sends eval counts in the final chunk when done=True
+                    metrics = data if is_done else None
 
-                    if data.get("done"):
+                    if chunk or metrics:
+                        yield chunk, None, metrics
+
+                    if is_done:
                         break
     except Exception as e:
-        yield "", f"No response or connection timed out: {e}"
+        yield "", f"No response or connection timed out: {e}", None
