@@ -52,7 +52,7 @@ update_preview() {
   if [ "$count" -eq 0 ]; then
     # Generate a placeholder if no images are captured yet
     im_convert -size 600x150 xc:"#222222" -gravity center -pointsize 18 -fill "#EEEEEE" \
-      -annotate +0+0 "No Images Captured\nClick 'Capture Image' to take a screenshot" "$PREVIEW_PATH"
+      -annotate +0+0 "No Images Captured\nClick 'Capture Image' or 'Add File' to attach" "$PREVIEW_PATH"
   else
     # Stitch all captured images into a tidy gallery preview
     im_montage -background transparent -geometry "150x150>+5+5" "$IMG_DIR"/*.png "$PREVIEW_PATH"
@@ -77,6 +77,7 @@ while true; do
     --field="Select Preset:CB" "$PRESETS" \
     --field="Custom Prompt (Multiline):TXT" "$CURRENT_CUSTOM" \
     --width=700 --height=600 \
+    --button="Add File:4" \
     --button="Capture Image:2" \
     --button="Clear Images:3" \
     --button="Cancel:1" \
@@ -84,7 +85,7 @@ while true; do
 
   RET=$?
 
-  # Save the typed custom prompt so it isn't wiped when taking a screenshot
+  # Save the typed custom prompt so it isn't wiped when taking a screenshot/adding file
   if [ -n "$FORM_DATA" ]; then
     SELECTED_PRESET="${FORM_DATA%%|||*}"
     REMAINDER="${FORM_DATA#*|||}"
@@ -94,6 +95,20 @@ while true; do
   if [ $RET -eq 1 ] || [ $RET -eq 252 ]; then
     # Cancel / Window closed
     exit 0
+  elif [ $RET -eq 4 ]; then
+    # Add Image via File Explorer (Fixed module name to --file)
+    SELECTED_FILES=$(yad --file --multiple --separator="|" --title="Select Image(s)")
+
+    if [ -n "$SELECTED_FILES" ]; then
+      # Read separated files into an array and convert them to PNG in the temp dir
+      IFS='|' read -ra FILES <<<"$SELECTED_FILES"
+      for f in "${FILES[@]}"; do
+        if [ -f "$f" ]; then
+          IMG_FILE="$IMG_DIR/file_$(date +%s%N)_$RANDOM.png"
+          im_convert "$f" "$IMG_FILE"
+        fi
+      done
+    fi
   elif [ $RET -eq 2 ]; then
     # Capture Image (yad temporarily closes, screen dims, user selects, loop restarts)
     IMG_FILE="$IMG_DIR/shot_$(date +%s%N).png"
