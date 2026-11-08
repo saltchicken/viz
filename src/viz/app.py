@@ -616,10 +616,8 @@ class OllamaVisionApp(App):
         """Toggles between the prep panel and the chat panel."""
         if self.view == "prep":
             self._set_view("chat")
-            self.notify("View: Chat")
         else:
             self._set_view("prep")
-            self.notify("View: Prep")
 
     def action_show_debug(self) -> None:
         """Shows the raw API payload of the last request."""

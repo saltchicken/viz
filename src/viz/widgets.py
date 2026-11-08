@@ -142,7 +142,9 @@ class ChatMessage(Vertical):
         )
 
     def _compose_markdown_chunks(self, prefix_md: str) -> ComposeResult:
-        chunks = re.split(r"(```.*?```)", self.raw_text, flags=re.DOTALL)
+        # Match ``` at the start of a line (with up to 3 spaces of indentation)
+        # It handles unclosed code blocks by matching to the end of the string (\Z)
+        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", self.raw_text, flags=re.MULTILINE)
         if chunks:
             chunks[0] = prefix_md + chunks[0]
 
@@ -151,8 +153,13 @@ class ChatMessage(Vertical):
                 continue
 
             if self._is_code_block(chunk):
+                md_text = chunk
+                # Ensure unclosed code blocks format correctly in the Markdown widget
+                if not md_text.rstrip().endswith("```"):
+                    md_text += "\n```"
+                    
                 with Vertical(classes="code-wrapper"):
-                    yield Markdown(chunk, classes="md-chunk")
+                    yield Markdown(md_text, classes="md-chunk")
                     yield CopyCodeButton(
                         self._extract_inner_code(chunk),
                         label="📋",
@@ -190,19 +197,17 @@ class ChatMessage(Vertical):
 
         prefix_md, _ = self._get_role_prefixes()
 
-        # If there are no code blocks, we can just do one final update to catch
-        # any chunks that were held back by the throttle.
         if "```" not in self.raw_text:
             if self._streaming_md is not None:
                 self._streaming_md.update(f"{prefix_md}{self.raw_text}")
             return
 
-        # Otherwise, tear down and rebuild the Markdown container for copy buttons
         md_container = self.query_one(".md-view-container", Vertical)
         md_container.remove_children()
         self._streaming_md = None
 
-        chunks = re.split(r"(```.*?```)", self.raw_text, flags=re.DOTALL)
+        # Use the updated regex here as well
+        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", self.raw_text, flags=re.MULTILINE)
         if chunks:
             chunks[0] = prefix_md + chunks[0]
 
@@ -210,9 +215,13 @@ class ChatMessage(Vertical):
             if not chunk.strip():
                 continue
             if self._is_code_block(chunk):
+                md_text = chunk
+                if not md_text.rstrip().endswith("```"):
+                    md_text += "\n```"
+                    
                 wrapper = Vertical(classes="code-wrapper")
                 md_container.mount(wrapper)
-                wrapper.mount(Markdown(chunk, classes="md-chunk"))
+                wrapper.mount(Markdown(md_text, classes="md-chunk"))
                 wrapper.mount(
                     CopyCodeButton(
                         self._extract_inner_code(chunk),
@@ -225,12 +234,24 @@ class ChatMessage(Vertical):
 
     @staticmethod
     def _is_code_block(chunk: str) -> bool:
-        return chunk.startswith("```") and chunk.endswith("```")
+        # Since the regex isolates the whole block, checking the start is sufficient
+        return chunk.lstrip().startswith("```")
 
     @staticmethod
     def _extract_inner_code(chunk: str) -> str:
-        match = re.match(r"```[^\n]*\n(.*?)```", chunk, re.DOTALL)
-        return match.group(1).strip() if match else chunk.strip("`").strip()
+        # A safer line-based approach to extract code, avoiding regex edge cases
+        lines = chunk.splitlines()
+        if not lines:
+            return ""
+        
+        # Remove the first line (e.g., ```python)
+        content_lines = lines[1:]
+        
+        # If the last line is a closing ```, remove it 
+        if content_lines and content_lines[-1].lstrip().startswith("```"):
+            content_lines = content_lines[:-1]
+            
+        return "\n".join(content_lines).strip()
 
     def on_mount(self) -> None:
         self.toggle_view(self.is_markdown)
