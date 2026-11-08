@@ -168,29 +168,42 @@ class ChatMessage(Vertical):
         prefix_md = "**You:**\n\n" if self.role == "user" else f"**Ollama ({self.model_name}):**\n\n"
         prefix_raw = "You:\n\n" if self.role == "user" else f"Ollama ({self.model_name}):\n\n"
         
-        self.md_view = Markdown(f"{prefix_md}{self.raw_text}")
-        self.raw_view = Static(f"{prefix_raw}{self.raw_text}")
-        
-        self.md_view.display = self.is_markdown
-        self.raw_view.display = not self.is_markdown
-        
-        yield self.md_view
-        yield self.raw_view
-
-        # Find code blocks and yield copy buttons
-        codeblocks = re.findall(r'```[^\n]*\n(.*?)```', self.raw_text, re.DOTALL)
-        if codeblocks:
-            with Horizontal(classes="code-action-row"):
-                for i, code in enumerate(codeblocks):
+        # Markdown View Container (Split into chunks and code blocks)
+        with Vertical(classes="md-view-container"):
+            chunks = re.split(r'(```.*?```)', self.raw_text, flags=re.DOTALL)
+            if chunks:
+                chunks[0] = prefix_md + chunks[0]
+            
+            code_idx = 1
+            for chunk in chunks:
+                if not chunk.strip():
+                    continue
+                
+                if chunk.startswith("```") and chunk.endswith("```"):
+                    match = re.match(r'```[^\n]*\n(.*?)```', chunk, re.DOTALL)
+                    inner_code = match.group(1).strip() if match else chunk.strip('`').strip()
+                    
+                    yield Markdown(chunk, classes="md-chunk")
                     yield CopyCodeButton(
-                        code.strip(), 
-                        label=f"📋 Code {i+1}", 
-                        classes="copy-code-btn",
+                        inner_code, 
+                        label=f"📋 Copy Code {code_idx}", 
+                        classes="copy-code-btn inline-copy-btn",
                         variant="primary"
                     )
+                    code_idx += 1
+                else:
+                    yield Markdown(chunk, classes="md-chunk")
+
+        # Raw View Container
+        self.raw_view = Static(f"{prefix_raw}{self.raw_text}")
+        yield self.raw_view
+
+    def on_mount(self) -> None:
+        self.query_one(".md-view-container", Vertical).display = self.is_markdown
+        self.raw_view.display = not self.is_markdown
 
     def toggle_view(self, show_markdown: bool) -> None:
-        self.md_view.display = show_markdown
+        self.query_one(".md-view-container", Vertical).display = show_markdown
         self.raw_view.display = not show_markdown
 
     @on(Button.Pressed, ".copy-code-btn")
@@ -199,11 +212,9 @@ class ChatMessage(Vertical):
         assert isinstance(button, CopyCodeButton)
         
         try:
-            # Use Textual's native clipboard API
             self.app.copy_to_clipboard(button.code_text)
             self.app.notify(f"Copied {button.label} to clipboard!")
         except Exception:
-            # Fallback to Wayland's wl-copy (since you use wl-paste elsewhere)
             try:
                 subprocess.run(["wl-copy"], input=button.code_text.encode("utf-8"), check=True)
                 self.app.notify(f"Copied {button.label} via wl-copy!")
@@ -293,16 +304,20 @@ class OllamaVisionApp(App):
         background: $surface;
         border-left: thick $success;
     }
-    .code-action-row {
+    .md-view-container {
         height: auto;
-        margin-top: 1;
-        align: right middle;
     }
-    .copy-code-btn {
+    .md-chunk {
+        height: auto;
+        margin-bottom: 0;
+    }
+    .inline-copy-btn {
         min-width: 14;
-        margin-left: 1;
+        margin-top: 0;
+        margin-bottom: 1;
         border: none;
         height: 1;
+        align: right middle;
     }
     """
 
