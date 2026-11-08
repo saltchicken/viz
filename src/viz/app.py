@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from pathlib import Path
 
@@ -26,7 +27,26 @@ from viz.modals import DebugModal
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
-from viz.widgets import ChatMessage
+from viz.widgets import ChatMessage, CommandApproval
+
+# Define the tool capability
+COMMAND_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "execute_command",
+        "description": "Executes a shell command on the user's system. Use this when you need to inspect files, run scripts, or perform system operations.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash shell command to execute."
+                }
+            },
+            "required": ["command"]
+        }
+    }
+}
 
 PRESETS = [
     ("Custom", "Custom"),
@@ -244,12 +264,6 @@ class OllamaVisionApp(App):
         for hint in self.query("#empty-chat-hint"):
             hint.remove()
             
-        raw_sys_val = self.query_one("#system-select", Select).value
-        system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
-
-        ctx_val = self.query_one("#ctx-input", Input).value
-        num_ctx = int(ctx_val) if ctx_val.isdigit() else 2048
-
         self.messages.append(self._build_user_message(prompt))
         self.last_user_msg_widget = self._mount_chat_message(
             prompt,
@@ -259,6 +273,18 @@ class OllamaVisionApp(App):
         )
         self._reset_prompt_inputs()
 
+        self._trigger_ollama_turn()
+
+    def _trigger_ollama_turn(self) -> None:
+        """Sets up the UI to stream an assistant response and fires the worker."""
+        # Block automatic followups if we are waiting for user approvals
+        pending_approvals = [
+            cmd for cmd in self.query(CommandApproval) 
+            if not cmd.has_class("resolved")
+        ]
+        if pending_approvals:
+            return  
+
         self.streaming_msg_widget = self._mount_chat_message(
             "",
             role="assistant",
@@ -267,6 +293,13 @@ class OllamaVisionApp(App):
             streaming=True,
         )
         self._set_streaming_ui_state(True)
+        
+        raw_sys_val = self.query_one("#system-select", Select).value
+        system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
+
+        ctx_val = self.query_one("#ctx-input", Input).value
+        num_ctx = int(ctx_val) if ctx_val.isdigit() else 2048
+
         self.active_worker = self.stream_ollama_response(
             system_prompt=system_prompt,
             num_ctx=num_ctx
@@ -285,8 +318,7 @@ class OllamaVisionApp(App):
             partial_text = self.streaming_msg_widget.raw_text.strip()
             if partial_text:
                 # Keep the partial response in history so context isn't lost
-                self.streaming_msg_widget.append_chunk(
-                    "\n\n*[Generation cancelled]*")
+                self.streaming_msg_widget.append_chunk("\n\n*[Generation cancelled]*")
                 self.streaming_msg_widget.finalize_stream()
                 self.messages.append({
                     "role": "assistant",
@@ -396,19 +428,23 @@ class OllamaVisionApp(App):
                 debug_msg["images"] = [f"<base64 data, length: {len(b64)}>" for b64 in msg["images"]]
             debug_messages.append(debug_msg)
             
+        tools = [COMMAND_TOOL]
         self.last_api_payload = {
             "model": self.model,
             "messages": debug_messages,
             "options": {"num_ctx": num_ctx},
             "stream": True,
+            "tools": tools
         }
 
         ollama_options = {"num_ctx": num_ctx}
+        collected_tool_calls = []
 
-        async for chunk, error_msg, metrics in stream_ollama_chat_async(
+        async for chunk, error_msg, metrics, tool_calls in stream_ollama_chat_async(
             self.model, 
             messages_snapshot, 
-            options=ollama_options
+            options=ollama_options,
+            tools=tools
         ):
             if worker.is_cancelled:
                 return
@@ -417,6 +453,8 @@ class OllamaVisionApp(App):
                 return
             if chunk:
                 self.handle_stream_chunk(chunk)
+            if tool_calls:
+                collected_tool_calls.extend(tool_calls)
             if metrics:
                 p_count = metrics.get("prompt_eval_count", 0)
                 e_count = metrics.get("eval_count", 0)
@@ -428,7 +466,7 @@ class OllamaVisionApp(App):
                 )
 
         if not worker.is_cancelled:
-            self.handle_stream_complete()
+            self.handle_stream_complete(tool_calls=collected_tool_calls)
 
     def handle_stream_chunk(self, chunk: str) -> None:
         if self.streaming_msg_widget is None:
@@ -451,7 +489,7 @@ class OllamaVisionApp(App):
         self.last_user_msg_widget = None
         self.notify(f"API Error: {error_msg}", severity="error", timeout=8)
 
-    def handle_stream_complete(self) -> None:
+    def handle_stream_complete(self, tool_calls: list[dict] | None = None) -> None:
         self._set_streaming_ui_state(False)
         self.active_worker = None
 
@@ -459,20 +497,120 @@ class OllamaVisionApp(App):
             return
 
         final_content = self.streaming_msg_widget.raw_text
-        if not final_content.strip():
+        if not final_content.strip() and not tool_calls:
             self.streaming_msg_widget.remove()
             self.streaming_msg_widget = None
-            self.notify("Received empty response from the model.",
-                        severity="error")
+            self.notify("Received empty response from the model.", severity="error")
             return
+        elif not final_content.strip() and tool_calls:
+            # Drop the empty text bubble if it's only a tool call response
+            self.streaming_msg_widget.remove()
+        else:
+            self.streaming_msg_widget.finalize_stream()
 
-        self.streaming_msg_widget.finalize_stream()
-        self.messages.append({"role": "assistant", "content": final_content})
+        assistant_msg: dict = {"role": "assistant", "content": final_content}
+        if tool_calls:
+            assistant_msg["tool_calls"] = tool_calls
+            
+        self.messages.append(assistant_msg)
         self.streaming_msg_widget = None
         self.last_user_msg_widget = None
 
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
+        
+        if tool_calls:
+            for tc in tool_calls:
+                approval = CommandApproval(tool_call=tc)
+                chat_scroll.mount(approval)
+
         chat_scroll.scroll_end(animate=True)
+
+    @on(Button.Pressed, "#btn-accept-cmd")
+    async def on_accept_cmd(self, event: Button.Pressed) -> None:
+        # Traverse up the DOM to find the parent CommandApproval widget
+        approval_widget = None
+        for node in event.button.ancestors:
+            if isinstance(node, CommandApproval):
+                approval_widget = node
+                break
+                
+        if not approval_widget or approval_widget.has_class("resolved"):
+            return
+            
+        approval_widget.add_class("resolved")
+        for btn in approval_widget.query(Button):
+            btn.disabled = True
+            
+        tool_call = approval_widget.tool_call
+        command = approval_widget.command
+        
+        self.notify(f"Running: {command}")
+        
+        try:
+            # Safe asynchronous shell execution, freeing the TUI
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            
+            output = stdout.decode()
+            if stderr:
+                output += f"\n[STDERR]\n{stderr.decode()}"
+        except Exception as e:
+            output = f"Error executing command: {str(e)}"
+            
+        if not output.strip():
+            output = "Command executed successfully with no output."
+            
+        self.messages.append({
+            "role": "tool",
+            "content": output,
+        })
+        
+        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
+        self._mount_chat_message(
+            f"**Command Result:**\n```\n{output}\n```",
+            role="tool",
+            css_class="tool-msg",
+            animate=False,
+        )
+        approval_widget.remove()
+        
+        self._trigger_ollama_turn()
+
+    @on(Button.Pressed, "#btn-decline-cmd")
+    def on_decline_cmd(self, event: Button.Pressed) -> None:
+        # Traverse up the DOM to find the parent CommandApproval widget
+        approval_widget = None
+        for node in event.button.ancestors:
+            if isinstance(node, CommandApproval):
+                approval_widget = node
+                break
+
+        if not approval_widget or approval_widget.has_class("resolved"):
+            return
+            
+        approval_widget.add_class("resolved")
+        for btn in approval_widget.query(Button):
+            btn.disabled = True
+            
+        self.messages.append({
+            "role": "tool",
+            "content": "The user declined to run this command.",
+        })
+        
+        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
+        self._mount_chat_message(
+            "*Command execution declined by user.*",
+            role="tool",
+            css_class="tool-msg",
+            animate=False,
+        )
+        approval_widget.remove()
+        
+        self._trigger_ollama_turn()
 
     def action_toggle_layout(self) -> None:
         """Cycles through 3 layout modes: Split -> Prep Only -> Chat Only."""

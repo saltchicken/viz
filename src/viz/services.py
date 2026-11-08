@@ -179,9 +179,10 @@ async def stream_ollama_chat_async(
     model: str,
     messages: list[dict],
     options: dict | None = None,
+    tools: list[dict] | None = None,
     timeout: int = config.ollama.chat_timeout,
-) -> AsyncIterator[tuple[str, str | None, dict | None]]:
-    """Streams a chat request from Ollama natively, yielding (token_chunk, error_message, metrics)."""
+) -> AsyncIterator[tuple[str, str | None, dict | None, list[dict] | None]]:
+    """Streams a chat request from Ollama natively, yielding (token_chunk, error_message, metrics, tool_calls)."""
     payload = {
         "model": model,
         "messages": messages,
@@ -189,6 +190,8 @@ async def stream_ollama_chat_async(
     }
     if options:
         payload["options"] = options
+    if tools:
+        payload["tools"] = tools
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -203,7 +206,7 @@ async def stream_ollama_chat_async(
                         err = resp.json().get("error", resp.text)
                     except Exception:
                         err = f"HTTP {resp.status_code}: {resp.text}"
-                    yield "", err, None
+                    yield "", err, None, None
                     return
 
                 async for line in resp.aiter_lines():
@@ -211,19 +214,20 @@ async def stream_ollama_chat_async(
                         continue
                     data = json.loads(line)
                     if error_msg := data.get("error"):
-                        yield "", error_msg, None
+                        yield "", error_msg, None, None
                         return
 
                     chunk = data.get("message", {}).get("content", "")
+                    tool_calls = data.get("message", {}).get("tool_calls")
                     is_done = data.get("done", False)
                     
                     # Ollama only sends eval counts in the final chunk when done=True
                     metrics = data if is_done else None
 
-                    if chunk or metrics:
-                        yield chunk, None, metrics
+                    if chunk or metrics or tool_calls:
+                        yield chunk, None, metrics, tool_calls
 
                     if is_done:
                         break
     except Exception as e:
-        yield "", f"No response or connection timed out: {e}", None
+        yield "", f"No response or connection timed out: {e}", None, None

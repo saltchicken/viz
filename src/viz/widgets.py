@@ -1,13 +1,12 @@
+import json
 import re
 import subprocess
 import time
 
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Vertical
-from textual.widgets import Button
-from textual.widgets import Markdown
-from textual.widgets import Static
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, Label, Markdown, Static
 
 
 class CopyCodeButton(Button):
@@ -16,6 +15,57 @@ class CopyCodeButton(Button):
     def __init__(self, code_text: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.code_text = code_text
+
+
+class CommandApproval(Vertical):
+    """Widget to ask user for command execution approval."""
+    
+    DEFAULT_CSS = """
+    CommandApproval {
+        background: $boost;
+        border: solid $warning;
+        padding: 1;
+        margin-bottom: 1;
+        height: auto;
+    }
+    .cmd-title {
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    .cmd-code {
+        background: $surface;
+        padding: 1;
+        margin-bottom: 1;
+        height: auto;
+    }
+    .cmd-buttons {
+        height: auto;
+        align: right middle;
+    }
+    .cmd-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, tool_call: dict, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.tool_call = tool_call
+        
+        args = tool_call.get("function", {}).get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        self.command = args.get("command", "")
+
+    def compose(self) -> ComposeResult:
+        yield Label("⚠️ The AI wants to execute a command:", classes="cmd-title")
+        yield Static(self.command, classes="cmd-code")
+        with Horizontal(classes="cmd-buttons"):
+            yield Button("Decline", id="btn-decline-cmd", variant="error")
+            yield Button("Accept & Run", id="btn-accept-cmd", variant="success")
 
 
 class ChatMessage(Vertical):
@@ -84,6 +134,8 @@ class ChatMessage(Vertical):
     def _get_role_prefixes(self) -> tuple[str, str]:
         if self.role == "user":
             return "**You:**\n\n", "You:\n\n"
+        if self.role in ("system", "tool"):
+            return "**System:**\n\n", "System:\n\n"
         return (
             f"**Ollama ({self.model_name}):**\n\n",
             f"Ollama ({self.model_name}):\n\n",

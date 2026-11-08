@@ -186,3 +186,9 @@ DebugModal {
     margin: 1 0;
     border: solid $secondary;
 }
+
+/* Styling for system/tool message results */
+.tool-msg {
+    background: $surface;
+    border-left: thick $warning;
+}
