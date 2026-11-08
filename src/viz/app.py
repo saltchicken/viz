@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 
 from textual import on
@@ -59,7 +60,7 @@ class OllamaVisionApp(App):
         self.workspace = ImageWorkspace()
 
         self.messages: list[dict] = []
-        self.first_turn = True
+        self.sent_images: set[Path] = set()
         self.active_worker: Worker | None = None
         self.streaming_msg_widget: ChatMessage | None = None
         self.last_user_msg_widget: ChatMessage | None = None
@@ -214,7 +215,7 @@ class OllamaVisionApp(App):
             self.action_cancel_stream()
 
         self.messages.clear()
-        self.first_turn = True
+        self.sent_images.clear()
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         chat_scroll.remove_children()
         chat_scroll.mount(
@@ -289,8 +290,10 @@ class OllamaVisionApp(App):
                     self.last_user_msg_widget.remove()
                 if self.messages and self.messages[-1]["role"] == "user":
                     popped = self.messages.pop()
-                    if "images" in popped:
-                        self.first_turn = True
+                    if "_source_paths" in popped:
+                        self.sent_images.difference_update(popped["_source_paths"])
+                        
+                    if not any("images" in m for m in self.messages):
                         self.query_one("#prompt-label",
                                        Label).update("Prompt (Multiline):")
 
@@ -317,12 +320,22 @@ class OllamaVisionApp(App):
 
     def _build_user_message(self, prompt: str) -> dict:
         msg_entry: dict = {"role": "user", "content": prompt}
-        if self.first_turn:
-            encoded_images = self.workspace.get_encoded_images()
-            if encoded_images:
-                msg_entry["images"] = encoded_images
-            self.first_turn = False
+        
+        # Find images in the workspace that haven't been sent yet
+        new_images = [
+            p for p in self.workspace.get_attached_images() 
+            if p not in self.sent_images
+        ]
+        
+        if new_images:
+            msg_entry["images"] = [
+                base64.b64encode(p.read_bytes()).decode("utf-8")
+                for p in new_images
+            ]
+            msg_entry["_source_paths"] = new_images  # Private tracking key
+            self.sent_images.update(new_images)
             self.query_one("#prompt-label", Label).update("Follow-up Question:")
+            
         return msg_entry
 
     def _mount_chat_message(
@@ -354,8 +367,13 @@ class OllamaVisionApp(App):
     @work(thread=True)
     def stream_ollama_response(self, system_prompt: str = "") -> None:
         worker = get_current_worker()
-        # Pass a shallow copy of messages so background iteration is thread-safe
-        messages_snapshot = list(self.messages)
+        
+        # Filter out internal tracking keys (like '_source_paths') 
+        # before passing the snapshot to the Ollama API
+        messages_snapshot = [
+            {k: v for k, v in msg.items() if not k.startswith("_")}
+            for msg in self.messages
+        ]
 
         if system_prompt.strip():
             messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
