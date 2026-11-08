@@ -388,6 +388,8 @@ class OllamaVisionApp(App):
     def on_mount(self) -> None:
         self.update_preview()
 
+        self.query_one("#prompt-input", TextArea).focus()
+
     @on(Switch.Changed, "#view-toggle")
     def on_view_toggle(self, event: Switch.Changed) -> None:
         """Toggle Markdown and Raw views across all rendered messages."""
