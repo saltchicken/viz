@@ -241,14 +241,14 @@ class OllamaVisionApp(App):
         self.notify("Cleared attached images.")
 
     @on(Button.Pressed, "#btn-reset")
-    def handle_reset(self) -> None:
+    async def handle_reset(self) -> None:
         if self.active_worker and self.active_worker.is_running:
             self.action_cancel_stream()
 
         self.messages.clear()
         self.sent_images.clear()
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        chat_scroll.remove_children()
+        await chat_scroll.remove_children()
         chat_scroll.mount(
             Static(
                 "Chat reset. Attach images and ask a question.",
