@@ -1,3 +1,4 @@
+# src/viz/app.py
 from pathlib import Path
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -25,9 +26,9 @@ class OllamaVisionApp(App):
     CSS_PATH = "styles.tcss"
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("ctrl+s", "ask_ollama", "Ask / Send"),
-        ("f2", "toggle_layout", "Toggle Layout"),
+        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+enter", "ask_ollama", "Ask / Send"),
+        ("ctrl+o", "toggle_layout", "Toggle Layout"),
     ]
 
     def __init__(self, model: str) -> None:
