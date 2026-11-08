@@ -243,7 +243,7 @@ class OllamaVisionApp(App):
     @on(Button.Pressed, "#btn-reset")
     async def handle_reset(self) -> None:
         if self.active_worker and self.active_worker.is_running:
-            self.action_cancel_stream()
+            await self.action_cancel_stream()
 
         self.messages.clear()
         self.sent_images.clear()
@@ -258,10 +258,10 @@ class OllamaVisionApp(App):
         self.notify("Conversation history cleared.")
 
     @on(Button.Pressed, "#btn-ask")
-    def action_ask_ollama(self) -> None:
+    async def action_ask_ollama(self) -> None:
         # If a stream is currently running, pressing the button cancels it
         if self.active_worker and self.active_worker.is_running:
-            self.action_cancel_stream()
+            await self.action_cancel_stream()
             return
 
         prompt = self._resolve_prompt()
@@ -315,7 +315,7 @@ class OllamaVisionApp(App):
             num_ctx=num_ctx
         )
 
-    def action_cancel_stream(self) -> None:
+    async def action_cancel_stream(self) -> None:
         """Cancels an in-progress streaming request."""
         if not self.active_worker or not self.active_worker.is_running:
             return
@@ -328,7 +328,7 @@ class OllamaVisionApp(App):
             partial_text = self.streaming_msg_widget.raw_text.strip()
             if partial_text:
                 self.streaming_msg_widget.append_chunk("\n\n*[Generation cancelled]*")
-                self.streaming_msg_widget.finalize_stream()
+                await self.streaming_msg_widget.finalize_stream()
                 self.messages.append({
                     "role": "assistant",
                     "content": partial_text
@@ -342,9 +342,9 @@ class OllamaVisionApp(App):
                     if "_source_paths" in popped:
                         self.sent_images.difference_update(popped["_source_paths"])
 
-                    if not any("images" in m for m in self.messages):
-                        self.query_one("#prompt-label",
-                                       Label).update("Prompt (Multiline):")
+                if not any("images" in m for m in self.messages):
+                    self.query_one("#prompt-label",
+                                   Label).update("Prompt (Multiline):")
 
             self.streaming_msg_widget = None
             self.last_user_msg_widget = None
@@ -453,7 +453,7 @@ class OllamaVisionApp(App):
             if worker.is_cancelled:
                 return
             if error_msg:
-                self.handle_stream_error(error_msg)
+                await self.handle_stream_error(error_msg)
                 return
             if chunk:
                 self.handle_stream_chunk(chunk)
@@ -470,7 +470,7 @@ class OllamaVisionApp(App):
                 )
 
         if not worker.is_cancelled:
-            self.handle_stream_complete(tool_calls=collected_tool_calls)
+            await self.handle_stream_complete(tool_calls=collected_tool_calls)
 
     def handle_stream_chunk(self, chunk: str) -> None:
         if self.streaming_msg_widget is None:
@@ -479,7 +479,7 @@ class OllamaVisionApp(App):
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         chat_scroll.scroll_end(animate=False)
 
-    def handle_stream_error(self, error_msg: str) -> None:
+    async def handle_stream_error(self, error_msg: str) -> None:
         self._set_streaming_ui_state(False)
         self.active_worker = None
 
@@ -487,13 +487,13 @@ class OllamaVisionApp(App):
             if not self.streaming_msg_widget.raw_text.strip():
                 self.streaming_msg_widget.remove()
             else:
-                self.streaming_msg_widget.finalize_stream()
+                await self.streaming_msg_widget.finalize_stream()
             self.streaming_msg_widget = None
 
         self.last_user_msg_widget = None
         self.notify(f"API Error: {error_msg}", severity="error", timeout=8)
 
-    def handle_stream_complete(self, tool_calls: list[dict] | None = None) -> None:
+    async def handle_stream_complete(self, tool_calls: list[dict] | None = None) -> None:
         self._set_streaming_ui_state(False)
         self.active_worker = None
 
@@ -509,7 +509,7 @@ class OllamaVisionApp(App):
         elif not final_content.strip() and tool_calls:
             self.streaming_msg_widget.remove()
         else:
-            self.streaming_msg_widget.finalize_stream()
+            await self.streaming_msg_widget.finalize_stream()
 
         assistant_msg: dict = {"role": "assistant", "content": final_content}
         if tool_calls:

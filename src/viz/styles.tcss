@@ -10,6 +10,7 @@
 
     $surface: #313244;
     $surface-lighten-1: #45475a;
+*/
 
 App {
     background: #1e1e2e;
@@ -117,15 +118,6 @@ ChatMessage {
 .md-chunk {
     height: auto;
     margin-bottom: 0;
-}
-
-.inline-copy-btn {
-    min-width: 4;
-    margin-top: 0;
-    margin-bottom: 1;
-    border: none;
-    height: 1;
-    align: right middle;
 }
 
 /* FileSelectModal */

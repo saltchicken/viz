@@ -1,20 +1,10 @@
 import json
 import re
-import subprocess
 import time
 
-from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Label, Markdown, Static
-
-
-class CopyCodeButton(Button):
-    """A button that holds the specific code block text to be copied."""
-
-    def __init__(self, code_text: str, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.code_text = code_text
 
 
 class CommandApproval(Vertical):
@@ -72,14 +62,6 @@ class ChatMessage(Vertical):
     """A container holding both Markdown and Raw text views, supporting live streaming."""
 
     DEFAULT_CSS = """
-    .code-wrapper {
-        height: auto;
-    }
-    .code-wrapper .inline-copy-btn {
-        dock: right;
-        margin-top: 1;
-        margin-right: 1;
-    }
     .stream-status {
         color: $warning;
         text-style: italic;
@@ -143,7 +125,6 @@ class ChatMessage(Vertical):
 
     def _compose_markdown_chunks(self, prefix_md: str) -> ComposeResult:
         # Match ``` at the start of a line (with up to 3 spaces of indentation)
-        # It handles unclosed code blocks by matching to the end of the string (\Z)
         chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", self.raw_text, flags=re.MULTILINE)
         if chunks:
             chunks[0] = prefix_md + chunks[0]
@@ -157,15 +138,7 @@ class ChatMessage(Vertical):
                 # Ensure unclosed code blocks format correctly in the Markdown widget
                 if not md_text.rstrip().endswith("```"):
                     md_text += "\n```"
-                    
-                with Vertical(classes="code-wrapper"):
-                    yield Markdown(md_text, classes="md-chunk")
-                    yield CopyCodeButton(
-                        self._extract_inner_code(chunk),
-                        label="📋",
-                        classes="copy-code-btn inline-copy-btn",
-                        variant="primary",
-                    )
+                yield Markdown(md_text, classes="md-chunk")
             else:
                 yield Markdown(chunk, classes="md-chunk")
 
@@ -188,8 +161,8 @@ class ChatMessage(Vertical):
                 self._streaming_md.update(f"{prefix_md}{self.raw_text}")
                 self._last_md_update = now
 
-    def finalize_stream(self) -> None:
-        """Finalizes streaming, forces a final render, and mounts copy buttons if needed."""
+    async def finalize_stream(self) -> None:
+        """Finalizes streaming and forces a final render of code blocks."""
         self.streaming = False
         if self._status_label is not None:
             self._status_label.remove()
@@ -203,14 +176,16 @@ class ChatMessage(Vertical):
             return
 
         md_container = self.query_one(".md-view-container", Vertical)
-        md_container.remove_children()
+        
+        # DOM Operations must be awaited
+        await md_container.remove_children()
         self._streaming_md = None
 
-        # Use the updated regex here as well
         chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", self.raw_text, flags=re.MULTILINE)
         if chunks:
             chunks[0] = prefix_md + chunks[0]
 
+        widgets_to_mount = []
         for chunk in chunks:
             if not chunk.strip():
                 continue
@@ -218,40 +193,16 @@ class ChatMessage(Vertical):
                 md_text = chunk
                 if not md_text.rstrip().endswith("```"):
                     md_text += "\n```"
-                    
-                wrapper = Vertical(classes="code-wrapper")
-                md_container.mount(wrapper)
-                wrapper.mount(Markdown(md_text, classes="md-chunk"))
-                wrapper.mount(
-                    CopyCodeButton(
-                        self._extract_inner_code(chunk),
-                        label="📋",
-                        classes="copy-code-btn inline-copy-btn",
-                        variant="primary",
-                    ))
+                widgets_to_mount.append(Markdown(md_text, classes="md-chunk"))
             else:
-                md_container.mount(Markdown(chunk, classes="md-chunk"))
+                widgets_to_mount.append(Markdown(chunk, classes="md-chunk"))
+                
+        # Safely mount all assembled widgets in a single pass
+        await md_container.mount_all(widgets_to_mount)
 
     @staticmethod
     def _is_code_block(chunk: str) -> bool:
-        # Since the regex isolates the whole block, checking the start is sufficient
         return chunk.lstrip().startswith("```")
-
-    @staticmethod
-    def _extract_inner_code(chunk: str) -> str:
-        # A safer line-based approach to extract code, avoiding regex edge cases
-        lines = chunk.splitlines()
-        if not lines:
-            return ""
-        
-        # Remove the first line (e.g., ```python)
-        content_lines = lines[1:]
-        
-        # If the last line is a closing ```, remove it 
-        if content_lines and content_lines[-1].lstrip().startswith("```"):
-            content_lines = content_lines[:-1]
-            
-        return "\n".join(content_lines).strip()
 
     def on_mount(self) -> None:
         self.toggle_view(self.is_markdown)
@@ -259,24 +210,3 @@ class ChatMessage(Vertical):
     def toggle_view(self, show_markdown: bool) -> None:
         self.query_one(".md-view-container", Vertical).display = show_markdown
         self.raw_view.display = not show_markdown
-
-    @on(Button.Pressed, ".copy-code-btn")
-    def on_copy_code(self, event: Button.Pressed) -> None:
-        button = event.button
-        assert isinstance(button, CopyCodeButton)
-        self._copy_text_to_clipboard(button.code_text, str(button.label))
-
-    def _copy_text_to_clipboard(self, text: str, label: str) -> None:
-        try:
-            self.app.copy_to_clipboard(text)
-            self.app.notify(f"Copied {label} to clipboard!")
-        except Exception:
-            try:
-                subprocess.run(
-                    ["wl-copy"],
-                    input=text.encode("utf-8"),
-                    check=True,
-                )
-                self.app.notify(f"Copied {label} via wl-copy!")
-            except Exception as e:
-                self.app.notify(f"Clipboard error: {e}", severity="error")
