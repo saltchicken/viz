@@ -51,7 +51,7 @@ update_preview() {
   local count=$(ls -1q "$IMG_DIR"/*.png 2>/dev/null | wc -l)
   if [ "$count" -eq 0 ]; then
     # Generate a placeholder if no images are captured yet
-    im_convert -size 600x150 xc:lightgray -gravity center -pointsize 18 -fill "#444444" \
+    im_convert -size 600x150 xc:"#222222" -gravity center -pointsize 18 -fill "#EEEEEE" \
       -annotate +0+0 "No Images Captured\nClick 'Capture Image' to take a screenshot" "$PREVIEW_PATH"
   else
     # Stitch all captured images into a tidy gallery preview
