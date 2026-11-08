@@ -54,7 +54,6 @@ FORM_DATA=$(yad --title="Ollama Vision ($MODEL)" \
   --center \
   --borders=10 \
   --image="$PREVIEW_PATH" \
-  --text="<big><b>Analyze Captured Image</b></big>\nSelect a preset or enter a custom prompt." \
   --form \
   --separator="|||" \
   --field="Select Preset:CB" "Custom!Describe this image in detail.!Extract all the text from this image.!Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt." \
