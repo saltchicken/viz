@@ -1,41 +1,42 @@
 #!/usr/bin/env python3
-import sys
-import os
-import shutil
-import tempfile
-import subprocess
 import base64
-from pathlib import Path
 from datetime import datetime
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
 import requests
-
-from textual import on, work
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import (
-    Header, Footer, Button, Select, TextArea, Static, 
-    Markdown, Label, DirectoryTree
-)
+from textual import on
+from textual import work
+from textual.app import App
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.containers import Vertical
+from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
+from textual.widgets import Button
+from textual.widgets import DirectoryTree
+from textual.widgets import Footer
+from textual.widgets import Header
+from textual.widgets import Label
+from textual.widgets import Markdown
+from textual.widgets import Select
+from textual.widgets import Static
+from textual.widgets import TextArea
 from textual.worker import get_current_worker
-
 # Use textual-image for native Kitty/Sixel terminal pixel rendering
 from textual_image.widget import Image as TextualImage
 
-
 PRESETS = [
     ("Custom", "Custom"),
-    (
-        "Describe this image in detail.", 
-        "Describe this image in detail."
-    ),
-    (
-        "Extract all the text from this image.", 
-        "Extract all the text from this image."
-    ),
-    (
-        "Create FLUX3 Prompt", 
-        "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt."
+    ("Describe this image in detail.", "Describe this image in detail."),
+    ("Extract all the text from this image.",
+     "Extract all the text from this image."),
+    ("Create FLUX3 Prompt",
+     "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt."
     ),
 ]
 
@@ -77,7 +78,8 @@ class FileSelectModal(ModalScreen[list[Path]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-dialog"):
-            yield Label("[b]Select Image(s)[/b] (Click files to toggle selection)")
+            yield Label(
+                "[b]Select Image(s)[/b] (Click files to toggle selection)")
             yield DirectoryTree(Path.home(), id="file-tree")
             yield Static("Selected: 0 files", id="selected-label")
             with Horizontal(classes="modal-buttons"):
@@ -92,9 +94,9 @@ class FileSelectModal(ModalScreen[list[Path]]):
         else:
             self.selected_files.append(path)
         names = ", ".join(p.name for p in self.selected_files)
-        self.query_one("#selected-label", Static).update(
-            f"Selected ({len(self.selected_files)}): {names}"
-        )
+        self.query_one(
+            "#selected-label",
+            Static).update(f"Selected ({len(self.selected_files)}): {names}")
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel(self) -> None:
@@ -135,8 +137,7 @@ class ThinkingModal(ModalScreen[bool]):
                 f"[b]Thinking...[/b]\n\n"
                 f"Please wait while the model generates a response.\n\n"
                 f"[i]'{self.prompt_snippet[:50]}...'[/i]",
-                id="thinking-text"
-            )
+                id="thinking-text")
             yield Button("Cancel Request", id="cancel-req-btn", variant="error")
 
     @on(Button.Pressed, "#cancel-req-btn")
@@ -221,7 +222,7 @@ class OllamaVisionApp(App):
         self.tmp_dir = Path(tempfile.mkdtemp(prefix="ollama-vision-"))
         self.img_dir = self.tmp_dir / "images"
         self.img_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.messages: list[dict] = []
         self.first_turn = True
         self.active_worker = None
@@ -235,22 +236,27 @@ class OllamaVisionApp(App):
                 yield Label("Prepare Vision Prompt", classes="section-title")
                 yield Static("No Images Captured", id="preview-state")
                 yield TextualImage(id="preview-image")
-                
+
                 with Horizontal(classes="btn-row"):
                     yield Button("Capture", id="btn-capture", variant="primary")
                     yield Button("Paste", id="btn-paste")
                 with Horizontal(classes="btn-row"):
                     yield Button("Add File", id="btn-add-file")
                     yield Button("Clear", id="btn-clear", variant="warning")
-                
+
                 yield Label("Select Preset:")
-                yield Select(PRESETS, value="Custom", id="preset-select", allow_blank=False)
-                
+                yield Select(PRESETS,
+                             value="Custom",
+                             id="preset-select",
+                             allow_blank=False)
+
                 yield Label("Prompt (Multiline):", id="prompt-label")
                 yield TextArea(id="prompt-input")
-                
+
                 with Horizontal(classes="btn-row"):
-                    yield Button("Ask Ollama (Ctrl+S)", id="btn-ask", variant="success")
+                    yield Button("Ask Ollama (Ctrl+S)",
+                                 id="btn-ask",
+                                 variant="success")
                     yield Button("Reset Chat", id="btn-reset", variant="error")
 
             # Right Panel: Markdown Chat History
@@ -259,8 +265,7 @@ class OllamaVisionApp(App):
                 with VerticalScroll(id="chat-scroll"):
                     yield Static(
                         "Attach images and enter a prompt on the left to start chatting.",
-                        id="empty-chat-hint"
-                    )
+                        id="empty-chat-hint")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -268,7 +273,8 @@ class OllamaVisionApp(App):
 
     def get_attached_images(self) -> list[Path]:
         """Return attached images sorted chronologically by when they were added."""
-        return sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        return sorted(self.img_dir.glob("*.png"),
+                      key=lambda p: p.stat().st_mtime)
 
     def update_preview(self) -> None:
         png_files = self.get_attached_images()
@@ -290,20 +296,24 @@ class OllamaVisionApp(App):
         self.sub_title = f"{count} image(s) attached"
 
         preview_path = self.tmp_dir / "preview.png"
-        
+
         if count == 1:
             # Show single image directly at full resolution
             img_widget.image = png_files[0]
         else:
             # Stitch multiple images into a high-res gallery preview
-            cmd = ["magick", "montage"] if shutil.which("magick") else ["montage"]
+            cmd = ["magick", "montage"
+                  ] if shutil.which("magick") else ["montage"]
             subprocess.run([
                 *cmd,
-                "-background", "#1e1e2e",
-                "-geometry", "400x400>+8+8",
+                "-background",
+                "#1e1e2e",
+                "-geometry",
+                "400x400>+8+8",
                 *[str(p) for p in png_files],
                 str(preview_path),
-            ], capture_output=True)
+            ],
+                           capture_output=True)
             img_widget.image = preview_path
 
     def im_convert(self, src: Path, dst: Path) -> bool:
@@ -344,11 +354,9 @@ class OllamaVisionApp(App):
         timestamp = datetime.now().strftime("%s%f")
         img_file = self.img_dir / f"paste_{timestamp}.png"
         with open(img_file, "wb") as f:
-            subprocess.run(
-                ["wl-paste", "-t", "image/png"],
-                stdout=f,
-                stderr=subprocess.DEVNULL
-            )
+            subprocess.run(["wl-paste", "-t", "image/png"],
+                           stdout=f,
+                           stderr=subprocess.DEVNULL)
 
         if not img_file.exists() or img_file.stat().st_size == 0:
             img_file.unlink(missing_ok=True)
@@ -359,6 +367,7 @@ class OllamaVisionApp(App):
 
     @on(Button.Pressed, "#btn-add-file")
     def handle_add_file(self) -> None:
+
         def process_files(files: list[Path] | None) -> None:
             if not files:
                 return
@@ -372,7 +381,8 @@ class OllamaVisionApp(App):
             if added:
                 self.notify(f"Added {added} image(s).")
             else:
-                self.notify("Failed to convert selected file(s).", severity="error")
+                self.notify("Failed to convert selected file(s).",
+                            severity="error")
             self.update_preview()
 
         self.push_screen(FileSelectModal(), process_files)
@@ -391,8 +401,8 @@ class OllamaVisionApp(App):
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         chat_scroll.remove_children()
         chat_scroll.mount(
-            Static("Chat reset. Attach images and ask a question.", id="empty-chat-hint")
-        )
+            Static("Chat reset. Attach images and ask a question.",
+                   id="empty-chat-hint"))
         self.query_one("#prompt-label", Label).update("Prompt (Multiline):")
         self.notify("Conversation history cleared.")
 
@@ -401,7 +411,8 @@ class OllamaVisionApp(App):
         preset_val = self.query_one("#preset-select", Select).value
         custom_text = self.query_one("#prompt-input", TextArea).text.strip()
 
-        prompt = custom_text if preset_val == "Custom" else (custom_text or str(preset_val))
+        prompt = custom_text if preset_val == "Custom" else (custom_text or
+                                                             str(preset_val))
         if not prompt:
             self.notify("Prompt cannot be empty.", severity="error")
             return
@@ -437,7 +448,7 @@ class OllamaVisionApp(App):
 
         # Show Thinking Modal & start background API worker
         self.thinking_modal = ThinkingModal(prompt)
-        
+
         def on_modal_close(completed_normally: bool | None) -> None:
             if completed_normally is False and self.active_worker:
                 self.active_worker.cancel()
@@ -459,11 +470,9 @@ class OllamaVisionApp(App):
             "stream": False,
         }
         try:
-            resp = requests.post(
-                "http://localhost:11434/api/chat",
-                json=payload,
-                timeout=180
-            )
+            resp = requests.post("http://localhost:11434/api/chat",
+                                 json=payload,
+                                 timeout=180)
             if worker.is_cancelled:
                 return
             data = resp.json()
@@ -488,7 +497,8 @@ class OllamaVisionApp(App):
             return
 
         if not content:
-            self.notify("Received empty response from the model.", severity="error")
+            self.notify("Received empty response from the model.",
+                        severity="error")
             return
 
         # Save to history
@@ -496,7 +506,8 @@ class OllamaVisionApp(App):
 
         # Render Markdown in Chat UI
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        assistant_md = Markdown(f"**Ollama ({self.model}):**\n\n{content}", classes="assistant-msg")
+        assistant_md = Markdown(f"**Ollama ({self.model}):**\n\n{content}",
+                                classes="assistant-msg")
         chat_scroll.mount(assistant_md)
         chat_scroll.scroll_end(animate=True)
         self.notify("Response received.")
@@ -511,10 +522,14 @@ def run_preflight_checks(model: str) -> None:
     required_cmds = ["grim", "slurp", "wl-paste"]
     for cmd in required_cmds:
         if not shutil.which(cmd):
-            sys.exit(f"[Missing Dependency] Required command '{cmd}' is not installed.")
+            sys.exit(
+                f"[Missing Dependency] Required command '{cmd}' is not installed."
+            )
 
     if not shutil.which("magick") and not shutil.which("convert"):
-        sys.exit("[Missing Dependency] ImageMagick is required. Please install 'imagemagick'.")
+        sys.exit(
+            "[Missing Dependency] ImageMagick is required. Please install 'imagemagick'."
+        )
 
     # 3. Check if Ollama is running
     try:
@@ -523,19 +538,18 @@ def run_preflight_checks(model: str) -> None:
     except Exception:
         sys.exit(
             "[Ollama Not Found] Ollama is not running on localhost:11434.\n"
-            "Please start the Ollama server and try again."
-        )
+            "Please start the Ollama server and try again.")
 
     # 3b. Check if the specified model is downloaded
     check_model = model if ":" in model else f"{model}:latest"
     try:
-        tags_resp = requests.get("http://localhost:11434/api/tags", timeout=2).json()
+        tags_resp = requests.get("http://localhost:11434/api/tags",
+                                 timeout=2).json()
         installed = [m.get("name") for m in tags_resp.get("models", [])]
         if check_model not in installed:
             sys.exit(
                 f"[Model Not Found] The model '{model}' is not installed in Ollama.\n"
-                f"Please open a terminal and run:\n  ollama pull {model}"
-            )
+                f"Please open a terminal and run:\n  ollama pull {model}")
     except Exception as e:
         sys.exit(f"[Ollama Error] Failed to verify installed models: {e}")
 
@@ -543,7 +557,7 @@ def run_preflight_checks(model: str) -> None:
 if __name__ == "__main__":
     target_model = sys.argv[1] if len(sys.argv) > 1 else "qwen3.8:27b"
     run_preflight_checks(target_model)
-    
+
     app = OllamaVisionApp(target_model)
     try:
         app.run()
