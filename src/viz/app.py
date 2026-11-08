@@ -349,7 +349,7 @@ class OllamaVisionApp(App):
             ask_btn.label = "Cancel (Esc)"
             ask_btn.variant = "error"
         else:
-            ask_btn.label = "Ask Ollama (Ctrl+S)"
+            ask_btn.label = "Ask Ollama"
             ask_btn.variant = "success"
 
     def _resolve_prompt(self) -> str:
