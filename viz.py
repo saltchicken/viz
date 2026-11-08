@@ -19,13 +19,9 @@ from textual.widgets import (
 from textual.screen import ModalScreen
 from textual.worker import get_current_worker
 
-# Optional terminal image preview support
-try:
-    from PIL import Image as PILImage
-    from rich_pixels import Pixels
-    HAS_PIXELS = True
-except ImportError:
-    HAS_PIXELS = False
+# Use textual-image for native Kitty/Sixel terminal pixel rendering
+from textual_image.widget import Image as TextualImage
+
 
 PRESETS = [
     ("Custom", "Custom"),
@@ -169,13 +165,16 @@ class OllamaVisionApp(App):
         color: $accent;
         margin-bottom: 1;
     }
-    #preview-box {
+    #preview-state {
         height: auto;
-        max-height: 14;
-        border: dashed $secondary;
-        padding: 1;
+        color: $text-muted;
         margin-bottom: 1;
-        overflow-y: auto;
+    }
+    #preview-image {
+        height: 14;
+        width: 100%;
+        border: dashed $secondary;
+        margin-bottom: 1;
     }
     .btn-row {
         height: auto;
@@ -234,7 +233,9 @@ class OllamaVisionApp(App):
             # Left Panel: Image Preparation & Prompt Setup
             with Vertical(id="prep-panel"):
                 yield Label("Prepare Vision Prompt", classes="section-title")
-                yield Static("No Images Captured", id="preview-box")
+                yield Static("No Images Captured", id="preview-state")
+                yield TextualImage(id="preview-image")
+                
                 with Horizontal(classes="btn-row"):
                     yield Button("Capture", id="btn-capture", variant="primary")
                     yield Button("Paste", id="btn-paste")
@@ -268,31 +269,38 @@ class OllamaVisionApp(App):
     def update_preview(self) -> None:
         png_files = sorted(self.img_dir.glob("*.png"))
         count = len(png_files)
-        preview_box = self.query_one("#preview-box", Static)
+        state_label = self.query_one("#preview-state", Static)
+        img_widget = self.query_one("#preview-image", TextualImage)
 
         if count == 0:
-            preview_box.update(
-                "Images Attached: [b]0[/b]\n"
-                "[dim]Click 'Capture', 'Paste', or 'Add File' to attach.[/dim]"
+            state_label.update(
+                "Images Attached: [b]0[/b] — Click 'Capture', 'Paste', or 'Add File'"
             )
+            img_widget.image = None
+            img_widget.display = False
+            self.sub_title = "0 images attached"
             return
 
-        file_list = "\n".join(f"• {p.name}" for p in png_files)
-        header = f"Images Attached: [b]{count}[/b]\n{file_list}"
+        state_label.update(f"Images Attached: [b]{count}[/b]")
+        img_widget.display = True
+        self.sub_title = f"{count} image(s) attached"
 
-        if HAS_PIXELS:
-            try:
-                # Render a quick thumbnail of the latest image if rich-pixels is installed
-                img = PILImage.open(png_files[-1])
-                img.thumbnail((36, 12))
-                pixels = Pixels.from_image(img)
-                preview_box.update(pixels)
-                self.sub_title = f"{count} image(s) attached"
-                return
-            except Exception:
-                pass
-
-        preview_box.update(header)
+        preview_path = self.tmp_dir / "preview.png"
+        
+        if count == 1:
+            # Show single image directly at full resolution
+            img_widget.image = png_files[0]
+        else:
+            # Stitch multiple images into a high-res gallery preview
+            cmd = ["magick", "montage"] if shutil.which("magick") else ["montage"]
+            subprocess.run([
+                *cmd,
+                "-background", "#1e1e2e",
+                "-geometry", "400x400>+8+8",
+                *[str(p) for p in png_files],
+                str(preview_path),
+            ], capture_output=True)
+            img_widget.image = preview_path
 
     def im_convert(self, src: Path, dst: Path) -> bool:
         cmd = "magick" if shutil.which("magick") else "convert"
