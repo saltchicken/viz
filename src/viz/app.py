@@ -42,11 +42,13 @@ class OllamaVisionApp(App):
     CSS_PATH = "styles.tcss"
 
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
-        ("ctrl+s", "ask_ollama", "Ask / Send"),
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
-        ("escape", "cancel_stream", "Cancel Stream"),
+        # ("ctrl+g", "capture", "Capture Region"),
+        # ("ctrl+v", "paste_image", "Paste Image"),
+        # ("ctrl+f", "add_file", "Add File"),
         ("ctrl+o", "toggle_layout", "Toggle Layout"),
+        # ("ctrl+r", "reset_chat", "Reset Chat"),
+        ("ctrl+q", "quit", "Quit"),
     ]
 
     def __init__(self, model: str) -> None:
