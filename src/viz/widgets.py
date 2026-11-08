@@ -57,6 +57,12 @@ class CommandApproval(Vertical):
             yield Button("Decline", id="btn-decline-cmd", variant="error")
             yield Button("Accept & Run", id="btn-accept-cmd", variant="success")
 
+    def mark_resolved(self) -> None:
+        """Marks the command approval as resolved and disables interaction buttons."""
+        self.add_class("resolved")
+        for btn in self.query(Button):
+            btn.disabled = True
+
 
 class ChatMessage(Vertical):
     """A container holding both Markdown and Raw text views, supporting live streaming."""

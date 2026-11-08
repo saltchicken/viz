@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import shlex
 from pathlib import Path
 
 from textual import on
@@ -28,20 +27,9 @@ from viz.modals import DebugModal
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
+from viz.services import get_command_tool_schema
+from viz.services import validate_command
 from viz.widgets import ChatMessage, CommandApproval
-
-PRESETS = [
-    ("Custom", "Custom"),
-    ("Describe this image in detail.", "Describe this image in detail."),
-    (
-        "Extract all the text from this image.",
-        "Extract all the text from this image.",
-    ),
-    (
-        "Create FLUX3 Prompt",
-        "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt.",
-    ),
-]
 
 
 class OllamaVisionApp(App):
@@ -69,33 +57,6 @@ class OllamaVisionApp(App):
 
         # "prep" or "chat"
         self.view = "prep"
-
-    def _get_command_tool(self) -> dict:
-        """Dynamically builds the tool payload including the current allowlist."""
-        allowed_list = ", ".join(config.app.allowed_commands)
-        
-        return {
-            "type": "function",
-            "function": {
-                "name": "execute_command",
-                "description": (
-                    "Executes a shell command on the user's system. "
-                    f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
-                    "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
-                    "Chaining and redirection are completely disabled and will cause the command to fail."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "The exact command to execute (e.g., 'ls -la' or 'cat file.txt')."
-                        }
-                    },
-                    "required": ["command"]
-                }
-            }
-        }
 
     def compose(self) -> ComposeResult:
         yield from self._compose_prep_panel()
@@ -208,6 +169,14 @@ class OllamaVisionApp(App):
         self.sub_title = f"{count} image(s) attached"
         img_widget.image = self.workspace.build_preview()
 
+    def _handle_image_action(self, success: bool, success_msg: str, error_msg: str, severity: str = "error") -> None:
+        """DRY helper for updating UI state after an image collection action."""
+        if success:
+            self.notify(success_msg)
+        else:
+            self.notify(error_msg, severity=severity)
+        self.update_preview()
+
     @on(Select.Changed, "#preset-select")
     def on_preset_changed(self, event: Select.Changed) -> None:
         prompt_area = self.query_one("#prompt-input", TextArea)
@@ -220,20 +189,15 @@ class OllamaVisionApp(App):
     def handle_capture(self) -> None:
         with self.suspend():
             captured = self.workspace.capture_screen_region()
-
-        if captured:
-            self.notify("Screen region captured.")
-        else:
-            self.notify("Capture cancelled.", severity="warning")
-        self.update_preview()
+        self._handle_image_action(captured, "Screen region captured.", "Capture cancelled.", "warning")
 
     @on(Button.Pressed, "#btn-paste")
     def handle_paste(self) -> None:
-        if self.workspace.paste_clipboard_image():
-            self.notify("Image pasted from clipboard.")
-            self.update_preview()
-        else:
-            self.notify("No image found in clipboard.", severity="error")
+        self._handle_image_action(
+            self.workspace.paste_clipboard_image(),
+            "Image pasted from clipboard.",
+            "No image found in clipboard."
+        )
 
     @on(Button.Pressed, "#btn-add-file")
     def handle_add_file(self) -> None:
@@ -243,11 +207,11 @@ class OllamaVisionApp(App):
         if not files:
             return
         added = self.workspace.import_files(files)
-        if added:
-            self.notify(f"Added {added} image(s).")
-        else:
-            self.notify("Failed to convert selected file(s).", severity="error")
-        self.update_preview()
+        self._handle_image_action(
+            added > 0, 
+            f"Added {added} image(s).", 
+            "Failed to convert selected file(s)."
+        )
 
     @on(Button.Pressed, "#btn-clear")
     def handle_clear(self) -> None:
@@ -443,20 +407,21 @@ class OllamaVisionApp(App):
         if system_prompt.strip():
             messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
 
-        debug_messages = []
-        for msg in messages_snapshot:
-            debug_msg = {k: v for k, v in msg.items() if k != "images"}
-            if "images" in msg:
-                debug_msg["images"] = [f"<base64 data, length: {len(b64)}>" for b64 in msg["images"]]
-            debug_messages.append(debug_msg)
+        # DRY image-stripped payload saving for the debug modal
+        def _strip_images(msg: dict) -> dict:
+            d = msg.copy()
+            if "images" in d:
+                d["images"] = [f"<base64 data, length: {len(b)}>" for b in d["images"]]
+            return d
 
-        tools = [self._get_command_tool()] if enable_tools else None
+        tools = [get_command_tool_schema(config.app.allowed_commands)] if enable_tools else None
         self.last_api_payload = {
             "model": self.model,
-            "messages": debug_messages,
+            "messages": [_strip_images(m) for m in messages_snapshot],
             "options": {"num_ctx": num_ctx},
             "stream": True,
         }
+        
         if tools:
             self.last_api_payload["tools"] = tools
 
@@ -547,81 +512,52 @@ class OllamaVisionApp(App):
 
         chat_scroll.scroll_end(animate=True)
 
-    def _is_command_secure(self, command: str) -> tuple[bool, str, list[str]]:
-        """Parses the command for vulnerabilities and checks against the allowlist."""
-        if not command.strip():
-            return False, "Command is empty.", []
+    def _get_approval_widget(self, button: Button) -> CommandApproval | None:
+        """Helper to find the parent CommandApproval widget from a Button."""
+        for node in button.ancestors:
+            if isinstance(node, CommandApproval):
+                return node
+        return None
 
-        # 1. Parse command to securely tokenize arguments
-        try:
-            parsed_cmd = shlex.split(command)
-        except ValueError as e:
-            return False, f"Malformed command string: {e}", []
-
-        if not parsed_cmd:
-            return False, "Command resolved to empty after parsing.", []
-
-        base_cmd = parsed_cmd[0]
-
-        # 2. Check against the configured allowlist
-        if base_cmd not in config.app.allowed_commands:
-            return False, f"Command '{base_cmd}' is not in the allowed list.", []
-
-        # 3. Check for shell injection vulnerabilities
-        forbidden_chars = [";", "&", "|", "`", "$", "<", ">"]
-        for char in forbidden_chars:
-            if char in command:
-                return False, f"Command contains forbidden shell operator: '{char}'. Chaining and piping are disabled.", []
-
-        return True, "", parsed_cmd
+    def _resolve_command(self, approval_widget: CommandApproval, internal_content: str, display_text: str) -> None:
+        """DRY helper for updating UI state after a user interacts with a command approval block."""
+        approval_widget.mark_resolved()
+        self.messages.append({
+            "role": "tool",
+            "content": internal_content,
+        })
+        
+        self._mount_chat_message(
+            display_text,
+            role="tool",
+            css_class="tool-msg",
+            animate=False,
+        )
+        approval_widget.remove()
+        self._trigger_ollama_turn()
 
     @on(Button.Pressed, "#btn-accept-cmd")
     async def on_accept_cmd(self, event: Button.Pressed) -> None:
-        approval_widget = None
-        for node in event.button.ancestors:
-            if isinstance(node, CommandApproval):
-                approval_widget = node
-                break
-
+        approval_widget = self._get_approval_widget(event.button)
         if not approval_widget or approval_widget.has_class("resolved"):
             return
 
         tool_call = approval_widget.tool_call
         command = approval_widget.command
 
-        # -- NEW SECURITY CHECK --
-        is_secure, error_msg, parsed_cmd = self._is_command_secure(command)
+        is_secure, error_msg, parsed_cmd = validate_command(command, config.app.allowed_commands)
         if not is_secure:
-            approval_widget.add_class("resolved")
-            for btn in approval_widget.query(Button):
-                btn.disabled = True
-            
             self.notify(f"Security Blocked: {error_msg}", severity="error")
-            self.messages.append({
-                "role": "tool",
-                "content": f"Security Policy Violation: {error_msg}",
-            })
-            
-            chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-            self._mount_chat_message(
-                f"**Command Blocked (Security):**\n```\n{error_msg}\n```",
-                role="tool",
-                css_class="tool-msg",
-                animate=False,
+            self._resolve_command(
+                approval_widget,
+                f"Security Policy Violation: {error_msg}",
+                f"**Command Blocked (Security):**\n```\n{error_msg}\n```"
             )
-            approval_widget.remove()
-            self._trigger_ollama_turn()
             return
-
-        # Mark as resolved
-        approval_widget.add_class("resolved")
-        for btn in approval_widget.query(Button):
-            btn.disabled = True
 
         self.notify(f"Running: {command}")
 
         try:
-            # Shifted to create_subprocess_exec for defense-in-depth
             proc = await asyncio.create_subprocess_exec(
                 *parsed_cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -638,52 +574,23 @@ class OllamaVisionApp(App):
         if not output.strip():
             output = "Command executed successfully with no output."
 
-        self.messages.append({
-            "role": "tool",
-            "content": output,
-        })
-
-        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        self._mount_chat_message(
-            f"**Command Result:**\n```\n{output}\n```",
-            role="tool",
-            css_class="tool-msg",
-            animate=False,
+        self._resolve_command(
+            approval_widget,
+            output,
+            f"**Command Result:**\n```\n{output}\n```"
         )
-        approval_widget.remove()
-
-        self._trigger_ollama_turn()
 
     @on(Button.Pressed, "#btn-decline-cmd")
     def on_decline_cmd(self, event: Button.Pressed) -> None:
-        approval_widget = None
-        for node in event.button.ancestors:
-            if isinstance(node, CommandApproval):
-                approval_widget = node
-                break
-
+        approval_widget = self._get_approval_widget(event.button)
         if not approval_widget or approval_widget.has_class("resolved"):
             return
 
-        approval_widget.add_class("resolved")
-        for btn in approval_widget.query(Button):
-            btn.disabled = True
-
-        self.messages.append({
-            "role": "tool",
-            "content": "The user declined to run this command.",
-        })
-
-        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        self._mount_chat_message(
-            "*Command execution declined by user.*",
-            role="tool",
-            css_class="tool-msg",
-            animate=False,
+        self._resolve_command(
+            approval_widget,
+            "The user declined to run this command.",
+            "*Command execution declined by user.*"
         )
-        approval_widget.remove()
-
-        self._trigger_ollama_turn()
 
     def action_toggle_view(self) -> None:
         """Toggles between the prep panel and the chat panel."""

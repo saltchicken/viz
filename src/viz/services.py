@@ -5,6 +5,7 @@ import json
 import math
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 
@@ -231,3 +232,60 @@ async def stream_ollama_chat_async(
                         break
     except Exception as e:
         yield "", f"No response or connection timed out: {e}", None, None
+
+
+def get_command_tool_schema(allowed_commands: list[str]) -> dict:
+    """Dynamically builds the tool payload schema including the current allowlist."""
+    allowed_list = ", ".join(allowed_commands)
+    
+    return {
+        "type": "function",
+        "function": {
+            "name": "execute_command",
+            "description": (
+                "Executes a shell command on the user's system. "
+                f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
+                "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
+                "Chaining and redirection are completely disabled and will cause the command to fail."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The exact command to execute (e.g., 'ls -la' or 'cat file.txt')."
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    }
+
+
+def validate_command(command: str, allowed_commands: list[str]) -> tuple[bool, str, list[str]]:
+    """Parses the command for vulnerabilities and checks against the allowlist."""
+    if not command.strip():
+        return False, "Command is empty.", []
+
+    # 1. Parse command to securely tokenize arguments
+    try:
+        parsed_cmd = shlex.split(command)
+    except ValueError as e:
+        return False, f"Malformed command string: {e}", []
+
+    if not parsed_cmd:
+        return False, "Command resolved to empty after parsing.", []
+
+    base_cmd = parsed_cmd[0]
+
+    # 2. Check against the configured allowlist
+    if base_cmd not in allowed_commands:
+        return False, f"Command '{base_cmd}' is not in the allowed list.", []
+
+    # 3. Check for shell injection vulnerabilities
+    forbidden_chars = [";", "&", "|", "`", "$", "<", ">"]
+    for char in forbidden_chars:
+        if char in command:
+            return False, f"Command contains forbidden shell operator: '{char}'. Chaining and piping are disabled.", []
+
+    return True, "", parsed_cmd
