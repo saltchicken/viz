@@ -22,6 +22,20 @@ if ! curl -s --connect-timeout 2 http://localhost:11434 >/dev/null; then
   exit 1
 fi
 
+# 3b. Check if the specified model is downloaded
+# Ollama appends ':latest' if no tag is specified, so we normalize the check string
+CHECK_MODEL="$MODEL"
+[[ "$CHECK_MODEL" != *":"* ]] && CHECK_MODEL="${CHECK_MODEL}:latest"
+
+# Fetch available tags and check for a match using jq's 'any' function
+if ! curl -s --connect-timeout 2 "http://localhost:11434/api/tags" | jq -e --arg m "$CHECK_MODEL" '.models | any(.name == $m)' >/dev/null; then
+  yad --center \
+    --title="Model Not Found" \
+    --text="<span font='FiraCode Nerd Font Mono 11'>The model '<b>$MODEL</b>' is not installed in Ollama.\n\nPlease open a terminal and run:\n<b>ollama pull $MODEL</b></span>" \
+    --button="OK:0"
+  exit 1
+fi
+
 # 4. Secure Temporary Directory & Setup
 TMP_DIR=$(mktemp -d -t ollama-vision-XXXXXX)
 trap 'rm -rf "$TMP_DIR"' EXIT
