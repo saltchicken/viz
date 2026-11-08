@@ -58,6 +58,23 @@ class OllamaVisionApp(App):
         # "prep" or "chat"
         self.view = "prep"
 
+    # --- UI Component Properties for DRY access ---
+    @property
+    def chat_scroll(self) -> VerticalScroll:
+        return self.query_one("#chat-scroll", VerticalScroll)
+
+    @property
+    def prompt_input(self) -> TextArea:
+        return self.query_one("#prompt-input", TextArea)
+
+    @property
+    def preset_select(self) -> Select:
+        return self.query_one("#preset-select", Select)
+        
+    @property
+    def prompt_label(self) -> Label:
+        return self.query_one("#prompt-label", Label)
+
     def compose(self) -> ComposeResult:
         yield from self._compose_prep_panel()
         yield from self._compose_chat_panel()
@@ -65,14 +82,13 @@ class OllamaVisionApp(App):
     def _set_view(self, view: str) -> None:
         """Switches visibility between the prep panel and chat panel."""
         self.view = view
-        prep_panel = self.query_one("#prep-panel", Vertical)
-        chat_panel = self.query_one("#chat-panel", Vertical)
-        prep_panel.display = (view == "prep")
-        chat_panel.display = (view == "chat")
+        self.query_one("#prep-panel", Vertical).display = (view == "prep")
+        self.query_one("#chat-panel", Vertical).display = (view == "chat")
+        
         if view == "chat":
-            self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
+            self.chat_scroll.scroll_end(animate=False)
         elif view == "prep":
-            self.query_one("#prompt-input", TextArea).focus()
+            self.prompt_input.focus()
 
     def _compose_prep_panel(self) -> ComposeResult:
         with Vertical(id="prep-panel"):
@@ -142,7 +158,7 @@ class OllamaVisionApp(App):
     def on_mount(self) -> None:
         self.update_preview()
         self._set_view("prep")
-        self.query_one("#prompt-input", TextArea).focus()
+        self.prompt_input.focus()
 
     @on(Switch.Changed, "#view-toggle")
     def on_view_toggle(self, event: Switch.Changed) -> None:
@@ -179,11 +195,10 @@ class OllamaVisionApp(App):
 
     @on(Select.Changed, "#preset-select")
     def on_preset_changed(self, event: Select.Changed) -> None:
-        prompt_area = self.query_one("#prompt-input", TextArea)
         if event.value == "Custom":
-            prompt_area.disabled = False
+            self.prompt_input.disabled = False
         else:
-            prompt_area.text = str(event.value)
+            self.prompt_input.text = str(event.value)
 
     @on(Button.Pressed, "#btn-capture")
     def handle_capture(self) -> None:
@@ -226,14 +241,14 @@ class OllamaVisionApp(App):
 
         self.messages.clear()
         self.sent_images.clear()
-        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        await chat_scroll.remove_children()
-        chat_scroll.mount(
+        await self.chat_scroll.remove_children()
+        self.chat_scroll.mount(
             Static(
                 "Chat reset. Attach images and ask a question.",
                 id="empty-chat-hint",
-            ))
-        self.query_one("#prompt-label", Label).update("Prompt (Multiline):")
+            )
+        )
+        self.prompt_label.update("Prompt (Multiline):")
         self.notify("Conversation history cleared.")
 
     @on(Button.Pressed, "#btn-ask")
@@ -259,10 +274,7 @@ class OllamaVisionApp(App):
             animate=False,
         )
         self._reset_prompt_inputs()
-
-        # Auto-switch to chat view
         self._set_view("chat")
-
         self._trigger_ollama_turn()
 
     def _trigger_ollama_turn(self) -> None:
@@ -285,10 +297,8 @@ class OllamaVisionApp(App):
 
         raw_sys_val = self.query_one("#system-select", Select).value
         system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
-
         ctx_val = self.query_one("#ctx-input", Input).value
         num_ctx = int(ctx_val) if ctx_val.isdigit() else 2048
-        
         enable_tools = self.query_one("#tools-toggle", Switch).value
 
         self.active_worker = self.stream_ollama_response(
@@ -297,23 +307,21 @@ class OllamaVisionApp(App):
             enable_tools=enable_tools
         )
 
-    async def action_cancel_stream(self) -> None:
-        """Cancels an in-progress streaming request."""
-        if not self.active_worker or not self.active_worker.is_running:
-            return
-
-        self.active_worker.cancel()
-        self.active_worker = None
+    async def _cleanup_stream_ui(self, append_text: str = "", notify_msg: str = "", notify_severity: str = "warning") -> None:
+        """DRY helper for cancelling or handling errors mid-stream."""
         self._set_streaming_ui_state(False)
+        self.active_worker = None
 
         if self.streaming_msg_widget is not None:
             partial_text = self.streaming_msg_widget.raw_text.strip()
+            
             if partial_text:
-                self.streaming_msg_widget.append_chunk("\n\n*[Generation cancelled]*")
+                if append_text:
+                    self.streaming_msg_widget.append_chunk(append_text)
                 await self.streaming_msg_widget.finalize_stream()
                 self.messages.append({
                     "role": "assistant",
-                    "content": partial_text
+                    "content": self.streaming_msg_widget.raw_text.strip()
                 })
             else:
                 self.streaming_msg_widget.remove()
@@ -325,13 +333,30 @@ class OllamaVisionApp(App):
                         self.sent_images.difference_update(popped["_source_paths"])
 
                 if not any("images" in m for m in self.messages):
-                    self.query_one("#prompt-label",
-                                   Label).update("Prompt (Multiline):")
+                    self.prompt_label.update("Prompt (Multiline):")
 
             self.streaming_msg_widget = None
             self.last_user_msg_widget = None
 
-        self.notify("Request cancelled.", severity="warning")
+        if notify_msg:
+            self.notify(notify_msg, severity=notify_severity)
+
+    async def action_cancel_stream(self) -> None:
+        """Cancels an in-progress streaming request."""
+        if not self.active_worker or not self.active_worker.is_running:
+            return
+            
+        self.active_worker.cancel()
+        await self._cleanup_stream_ui(
+            append_text="\n\n*[Generation cancelled]*", 
+            notify_msg="Request cancelled."
+        )
+
+    async def handle_stream_error(self, error_msg: str) -> None:
+        await self._cleanup_stream_ui(
+            notify_msg=f"API Error: {error_msg}", 
+            notify_severity="error"
+        )
 
     def _set_streaming_ui_state(self, is_streaming: bool) -> None:
         ask_btn = self.query_one("#btn-ask", Button)
@@ -343,15 +368,14 @@ class OllamaVisionApp(App):
             ask_btn.variant = "success"
 
     def _resolve_prompt(self) -> str:
-        preset_val = self.query_one("#preset-select", Select).value
-        custom_text = self.query_one("#prompt-input", TextArea).text.strip()
+        preset_val = self.preset_select.value
+        custom_text = self.prompt_input.text.strip()
         if preset_val == "Custom":
             return custom_text
         return custom_text or str(preset_val)
 
     def _build_user_message(self, prompt: str) -> dict:
         msg_entry: dict = {"role": "user", "content": prompt}
-
         new_images = [
             p for p in self.workspace.get_attached_images()
             if p not in self.sent_images
@@ -364,7 +388,7 @@ class OllamaVisionApp(App):
             ]
             msg_entry["_source_paths"] = new_images
             self.sent_images.update(new_images)
-            self.query_one("#prompt-label", Label).update("Follow-up Question:")
+            self.prompt_label.update("Follow-up Question:")
 
         return msg_entry
 
@@ -377,7 +401,6 @@ class OllamaVisionApp(App):
         streaming: bool = False,
     ) -> ChatMessage:
         is_markdown = self.query_one("#view-toggle", Switch).value
-        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         widget = ChatMessage(
             raw_text=text,
             role=role,
@@ -386,13 +409,13 @@ class OllamaVisionApp(App):
             streaming=streaming,
             classes=css_class,
         )
-        chat_scroll.mount(widget)
-        chat_scroll.scroll_end(animate=animate)
+        self.chat_scroll.mount(widget)
+        self.chat_scroll.scroll_end(animate=animate)
         return widget
 
     def _reset_prompt_inputs(self) -> None:
-        self.query_one("#prompt-input", TextArea).clear()
-        self.query_one("#preset-select", Select).value = "Custom"
+        self.prompt_input.clear()
+        self.preset_select.value = "Custom"
 
     @work
     async def stream_ollama_response(self, system_prompt: str = "", num_ctx: int = 2048, enable_tools: bool = True) -> None:
@@ -460,22 +483,7 @@ class OllamaVisionApp(App):
         if self.streaming_msg_widget is None:
             return
         self.streaming_msg_widget.append_chunk(chunk)
-        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        chat_scroll.scroll_end(animate=False)
-
-    async def handle_stream_error(self, error_msg: str) -> None:
-        self._set_streaming_ui_state(False)
-        self.active_worker = None
-
-        if self.streaming_msg_widget is not None:
-            if not self.streaming_msg_widget.raw_text.strip():
-                self.streaming_msg_widget.remove()
-            else:
-                await self.streaming_msg_widget.finalize_stream()
-            self.streaming_msg_widget = None
-
-        self.last_user_msg_widget = None
-        self.notify(f"API Error: {error_msg}", severity="error", timeout=8)
+        self.chat_scroll.scroll_end(animate=False)
 
     async def handle_stream_complete(self, tool_calls: list[dict] | None = None) -> None:
         self._set_streaming_ui_state(False)
@@ -503,14 +511,12 @@ class OllamaVisionApp(App):
         self.streaming_msg_widget = None
         self.last_user_msg_widget = None
 
-        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-
         if tool_calls:
             for tc in tool_calls:
                 approval = CommandApproval(tool_call=tc)
-                chat_scroll.mount(approval)
+                self.chat_scroll.mount(approval)
 
-        chat_scroll.scroll_end(animate=True)
+        self.chat_scroll.scroll_end(animate=True)
 
     def _get_approval_widget(self, button: Button) -> CommandApproval | None:
         """Helper to find the parent CommandApproval widget from a Button."""
@@ -594,10 +600,7 @@ class OllamaVisionApp(App):
 
     def action_toggle_view(self) -> None:
         """Toggles between the prep panel and the chat panel."""
-        if self.view == "prep":
-            self._set_view("chat")
-        else:
-            self._set_view("prep")
+        self._set_view("chat" if self.view == "prep" else "prep")
 
     def action_show_debug(self) -> None:
         """Shows the raw API payload of the last request."""

@@ -149,6 +149,26 @@ class ImageWorkspace:
             return False
 
 
+def _build_ollama_payload(
+    model: str, 
+    messages: list[dict], 
+    stream: bool, 
+    options: dict | None = None, 
+    tools: list[dict] | None = None
+) -> dict:
+    """DRY helper for building API payload formatting constraints."""
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+    }
+    if options:
+        payload["options"] = options
+    if tools:
+        payload["tools"] = tools
+    return payload
+
+
 async def query_ollama_chat_async(
     model: str,
     messages: list[dict],
@@ -156,13 +176,7 @@ async def query_ollama_chat_async(
     timeout: int = config.ollama.chat_timeout
 ) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-    }
-    if options:
-        payload["options"] = options
+    payload = _build_ollama_payload(model, messages, stream=False, options=options)
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -184,15 +198,7 @@ async def stream_ollama_chat_async(
     timeout: int = config.ollama.chat_timeout,
 ) -> AsyncIterator[tuple[str, str | None, dict | None, list[dict] | None]]:
     """Streams a chat request from Ollama natively, yielding (token_chunk, error_message, metrics, tool_calls)."""
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-    }
-    if options:
-        payload["options"] = options
-    if tools:
-        payload["tools"] = tools
+    payload = _build_ollama_payload(model, messages, stream=True, options=options, tools=tools)
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

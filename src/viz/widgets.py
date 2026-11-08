@@ -105,11 +105,10 @@ class ChatMessage(Vertical):
 
         with Vertical(classes="md-view-container"):
             if self.streaming:
-                self._streaming_md = Markdown(f"{prefix_md}{self.raw_text}",
-                                              classes="md-chunk")
+                self._streaming_md = Markdown(f"{prefix_md}{self.raw_text}", classes="md-chunk")
                 yield self._streaming_md
             else:
-                yield from self._compose_markdown_chunks(prefix_md)
+                yield from self._build_markdown_widgets(self.raw_text, prefix_md)
 
         self.raw_view = Static(f"{prefix_raw}{self.raw_text}", markup=False)
         yield self.raw_view
@@ -131,12 +130,13 @@ class ChatMessage(Vertical):
             f"Ollama ({self.model_name}):\n\n",
         )
 
-    def _compose_markdown_chunks(self, prefix_md: str) -> ComposeResult:
-        # Match ``` at the start of a line (with up to 3 spaces of indentation)
-        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", self.raw_text, flags=re.MULTILINE)
+    def _build_markdown_widgets(self, text: str, prefix_md: str) -> list[Markdown]:
+        """DRY method for chunking text safely by block formatting and converting them to Markdown Widgets."""
+        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", text, flags=re.MULTILINE)
         if chunks:
             chunks[0] = prefix_md + chunks[0]
 
+        widgets = []
         for chunk in chunks:
             if not chunk.strip():
                 continue
@@ -146,9 +146,11 @@ class ChatMessage(Vertical):
                 # Ensure unclosed code blocks format correctly in the Markdown widget
                 if not md_text.rstrip().endswith("```"):
                     md_text += "\n```"
-                yield Markdown(md_text, classes="md-chunk")
+                widgets.append(Markdown(md_text, classes="md-chunk"))
             else:
-                yield Markdown(chunk, classes="md-chunk")
+                widgets.append(Markdown(chunk, classes="md-chunk"))
+        
+        return widgets
 
     def append_chunk(self, chunk: str) -> None:
         """Appends a streamed token chunk and safely throttles markdown updates."""
@@ -188,24 +190,9 @@ class ChatMessage(Vertical):
         # DOM Operations must be awaited
         await md_container.remove_children()
         self._streaming_md = None
-
-        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", self.raw_text, flags=re.MULTILINE)
-        if chunks:
-            chunks[0] = prefix_md + chunks[0]
-
-        widgets_to_mount = []
-        for chunk in chunks:
-            if not chunk.strip():
-                continue
-            if self._is_code_block(chunk):
-                md_text = chunk
-                if not md_text.rstrip().endswith("```"):
-                    md_text += "\n```"
-                widgets_to_mount.append(Markdown(md_text, classes="md-chunk"))
-            else:
-                widgets_to_mount.append(Markdown(chunk, classes="md-chunk"))
                 
         # Safely mount all assembled widgets in a single pass
+        widgets_to_mount = self._build_markdown_widgets(self.raw_text, prefix_md)
         await md_container.mount_all(widgets_to_mount)
 
     @staticmethod
