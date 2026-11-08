@@ -111,7 +111,7 @@ class OllamaVisionApp(App):
 
             with Horizontal(classes="btn-row"):
                 yield Button(
-                    "Ask Ollama (Ctrl+S)",
+                    "Ask Ollama",
                     id="btn-ask",
                     variant="success",
                 )
