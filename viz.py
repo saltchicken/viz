@@ -3,6 +3,7 @@ import base64
 from datetime import datetime
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -146,6 +147,13 @@ class ThinkingModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class CopyCodeButton(Button):
+    """A button that holds the specific code block text to be copied."""
+    def __init__(self, code_text: str, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.code_text = code_text
+
+
 class ChatMessage(Vertical):
     """A container holding both Markdown and Raw text views."""
     
@@ -169,9 +177,38 @@ class ChatMessage(Vertical):
         yield self.md_view
         yield self.raw_view
 
+        # Find code blocks and yield copy buttons
+        codeblocks = re.findall(r'```[^\n]*\n(.*?)```', self.raw_text, re.DOTALL)
+        if codeblocks:
+            with Horizontal(classes="code-action-row"):
+                for i, code in enumerate(codeblocks):
+                    yield CopyCodeButton(
+                        code.strip(), 
+                        label=f"📋 Code {i+1}", 
+                        classes="copy-code-btn",
+                        variant="primary"
+                    )
+
     def toggle_view(self, show_markdown: bool) -> None:
         self.md_view.display = show_markdown
         self.raw_view.display = not show_markdown
+
+    @on(Button.Pressed, ".copy-code-btn")
+    def on_copy_code(self, event: Button.Pressed) -> None:
+        button = event.button
+        assert isinstance(button, CopyCodeButton)
+        
+        try:
+            # Use Textual's native clipboard API
+            self.app.copy_to_clipboard(button.code_text)
+            self.app.notify(f"Copied {button.label} to clipboard!")
+        except Exception:
+            # Fallback to Wayland's wl-copy (since you use wl-paste elsewhere)
+            try:
+                subprocess.run(["wl-copy"], input=button.code_text.encode("utf-8"), check=True)
+                self.app.notify(f"Copied {button.label} via wl-copy!")
+            except Exception as e:
+                self.app.notify(f"Clipboard error: {e}", severity="error")
 
 
 class OllamaVisionApp(App):
@@ -255,6 +292,17 @@ class OllamaVisionApp(App):
     .assistant-msg {
         background: $surface;
         border-left: thick $success;
+    }
+    .code-action-row {
+        height: auto;
+        margin-top: 1;
+        align: right middle;
+    }
+    .copy-code-btn {
+        min-width: 14;
+        margin-left: 1;
+        border: none;
+        height: 1;
     }
     """
 
