@@ -12,6 +12,7 @@ else:
 @dataclass
 class AppSettings:
     default_model: str = "qwen3.8:27b"
+    default_context: int = 32768
     required_commands: list[str] = field(default_factory=lambda: ["grim", "slurp", "wl-paste"])
     allowed_commands: list[str] = field(default_factory=lambda: ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"])
 
@@ -73,7 +74,3 @@ class Config:
             presets=presets,
             system_presets=system_presets
         )
-
-
-# Global configuration instance
-config = Config.load()

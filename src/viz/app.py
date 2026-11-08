@@ -9,6 +9,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.containers import Vertical
 from textual.containers import VerticalScroll
+from textual.validation import Integer
 from textual.widgets import Button
 from textual.widgets import Footer
 from textual.widgets import Header
@@ -22,7 +23,7 @@ from textual.worker import get_current_worker
 from textual.worker import Worker
 from textual_image.widget import Image as TextualImage
 
-from viz.config import config
+from viz.config import Config
 from viz.modals import DebugModal
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
@@ -42,11 +43,12 @@ class OllamaVisionApp(App):
         ("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, config: Config) -> None:
         super().__init__()
         self.model = model
+        self.config = config
         self.title = f"Ollama Vision ({self.model})"
-        self.workspace = ImageWorkspace()
+        self.workspace = ImageWorkspace(self.config)
 
         self.messages: list[dict] = []
         self.sent_images: set[Path] = set()
@@ -105,21 +107,26 @@ class OllamaVisionApp(App):
 
             yield Label("System Message:")
             yield Select(
-                config.system_presets,
+                self.config.system_presets,
                 id="system-select",
                 allow_blank=True,
             )
 
             yield Label("Select Preset:")
             yield Select(
-                config.presets,
+                self.config.presets,
                 value="Custom",
                 id="preset-select",
                 allow_blank=False,
             )
 
             yield Label("Context Size:")
-            yield Input(value="32768", type="integer", id="ctx-input")
+            yield Input(
+                value=str(self.config.app.default_context),
+                type="integer", 
+                id="ctx-input",
+                validators=[Integer(minimum=2048)]
+            )
 
             with Horizontal(classes="toggle-row"):
                 yield Label("Enable Tool Calling:")
@@ -297,8 +304,9 @@ class OllamaVisionApp(App):
 
         raw_sys_val = self.query_one("#system-select", Select).value
         system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
+        
         ctx_val = self.query_one("#ctx-input", Input).value
-        num_ctx = int(ctx_val) if ctx_val.isdigit() else 2048
+        num_ctx = int(ctx_val) if ctx_val.isdigit() else self.config.app.default_context
         enable_tools = self.query_one("#tools-toggle", Switch).value
 
         self.active_worker = self.stream_ollama_response(
@@ -437,7 +445,7 @@ class OllamaVisionApp(App):
                 d["images"] = [f"<base64 data, length: {len(b)}>" for b in d["images"]]
             return d
 
-        tools = [get_command_tool_schema(config.app.allowed_commands)] if enable_tools else None
+        tools = [get_command_tool_schema(self.config.app.allowed_commands)] if enable_tools else None
         self.last_api_payload = {
             "model": self.model,
             "messages": [_strip_images(m) for m in messages_snapshot],
@@ -454,6 +462,7 @@ class OllamaVisionApp(App):
         async for chunk, error_msg, metrics, tool_calls in stream_ollama_chat_async(
             self.model,
             messages_snapshot,
+            self.config,
             options=ollama_options,
             tools=tools
         ):
@@ -483,7 +492,6 @@ class OllamaVisionApp(App):
         if self.streaming_msg_widget is None:
             return
         self.streaming_msg_widget.append_chunk(chunk)
-        self.chat_scroll.scroll_end(animate=False)
 
     async def handle_stream_complete(self, tool_calls: list[dict] | None = None) -> None:
         self._set_streaming_ui_state(False)
@@ -551,7 +559,7 @@ class OllamaVisionApp(App):
         tool_call = approval_widget.tool_call
         command = approval_widget.command
 
-        is_secure, error_msg, parsed_cmd = validate_command(command, config.app.allowed_commands)
+        is_secure, error_msg, parsed_cmd = validate_command(command, self.config.app.allowed_commands)
         if not is_secure:
             self.notify(f"Security Blocked: {error_msg}", severity="error")
             self._resolve_command(

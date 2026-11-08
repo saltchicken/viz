@@ -4,7 +4,6 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
-import shutil
 import shlex
 import subprocess
 import tempfile
@@ -12,14 +11,17 @@ import tempfile
 from PIL import Image
 import httpx
 
-from viz.config import config
+from viz.config import Config
 
 
 class ImageWorkspace:
     """Manages temporary image storage, conversions, and external capture tools."""
 
-    def __init__(self) -> None:
-        self.tmp_dir = Path(tempfile.mkdtemp(prefix="ollama-vision-"))
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        # TemporaryDirectory automatically cleans up when garbage collected or closed
+        self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="ollama-vision-")
+        self.tmp_dir = Path(self._temp_dir_obj.name)
         self.img_dir = self.tmp_dir / "images"
         self.img_dir.mkdir(parents=True, exist_ok=True)
         self.preview_path = self.tmp_dir / "preview.png"
@@ -42,9 +44,9 @@ class ImageWorkspace:
             return png_files[0]
 
         images = [Image.open(p) for p in png_files]
-        max_w = config.preview.max_width
-        max_h = config.preview.max_height
-        margin = config.preview.margin
+        max_w = self.config.preview.max_width
+        max_h = self.config.preview.max_height
+        margin = self.config.preview.margin
 
         # Resize images, keeping aspect ratio
         processed_images = []
@@ -64,7 +66,7 @@ class ImageWorkspace:
         canvas_w = cols * cell_w + (cols + 1) * margin
         canvas_h = rows * cell_h + (rows + 1) * margin
 
-        canvas = Image.new("RGB", (canvas_w, canvas_h), color=config.preview.bg_color)
+        canvas = Image.new("RGB", (canvas_w, canvas_h), color=self.config.preview.bg_color)
 
         for idx, img in enumerate(processed_images):
             row = idx // cols
@@ -120,7 +122,7 @@ class ImageWorkspace:
             p.unlink(missing_ok=True)
 
     def cleanup(self) -> None:
-        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+        self._temp_dir_obj.cleanup()
 
     def _generate_filepath(self, prefix: str, suffix: str = "") -> Path:
         timestamp = datetime.now().strftime("%s%f")
@@ -172,14 +174,14 @@ def _build_ollama_payload(
 async def query_ollama_chat_async(
     model: str,
     messages: list[dict],
+    config: Config,
     options: dict | None = None,
-    timeout: int = config.ollama.chat_timeout
 ) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
     payload = _build_ollama_payload(model, messages, stream=False, options=options)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=config.ollama.chat_timeout) as client:
             resp = await client.post(f"{config.ollama.base_url}/api/chat", json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -193,15 +195,15 @@ async def query_ollama_chat_async(
 async def stream_ollama_chat_async(
     model: str,
     messages: list[dict],
+    config: Config,
     options: dict | None = None,
     tools: list[dict] | None = None,
-    timeout: int = config.ollama.chat_timeout,
 ) -> AsyncIterator[tuple[str, str | None, dict | None, list[dict] | None]]:
     """Streams a chat request from Ollama natively, yielding (token_chunk, error_message, metrics, tool_calls)."""
     payload = _build_ollama_payload(model, messages, stream=True, options=options, tools=tools)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=config.ollama.chat_timeout) as client:
             async with client.stream(
                     "POST",
                     f"{config.ollama.base_url}/api/chat",
@@ -269,7 +271,7 @@ def get_command_tool_schema(allowed_commands: list[str]) -> dict:
 
 
 def validate_command(command: str, allowed_commands: list[str]) -> tuple[bool, str, list[str]]:
-    """Parses the command for vulnerabilities and checks against the allowlist."""
+    """Parses the command for vulnerabilities, validates args, and checks against allowlist."""
     if not command.strip():
         return False, "Command is empty.", []
 
@@ -293,5 +295,10 @@ def validate_command(command: str, allowed_commands: list[str]) -> tuple[bool, s
     for char in forbidden_chars:
         if char in command:
             return False, f"Command contains forbidden shell operator: '{char}'. Chaining and piping are disabled.", []
+
+    # 4. Restrict file paths to prevent directory traversal
+    for arg in parsed_cmd[1:]:
+        if arg.startswith("/") or ".." in arg:
+            return False, f"Path traversal blocked: '{arg}'. Commands must operate in the current directory.", []
 
     return True, "", parsed_cmd

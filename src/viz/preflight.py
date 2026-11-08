@@ -3,17 +3,17 @@ import sys
 
 import httpx
 
-from viz.config import config
+from viz.config import Config
 
 
-def run_preflight_checks(model: str) -> None:
+def run_preflight_checks(model: str, config: Config) -> None:
     """Verifies system dependencies, Ollama server status, and model availability."""
-    _check_system_binaries()
-    _check_ollama_server()
-    _check_model_installed(model)
+    _check_system_binaries(config)
+    _check_ollama_server(config)
+    _check_model_installed(model, config)
 
 
-def _check_system_binaries() -> None:
+def _check_system_binaries(config: Config) -> None:
     for cmd in config.app.required_commands:
         if not shutil.which(cmd):
             sys.exit(
@@ -21,7 +21,7 @@ def _check_system_binaries() -> None:
             )
 
 
-def _check_ollama_server() -> None:
+def _check_ollama_server(config: Config) -> None:
     try:
         r = httpx.get(config.ollama.base_url, timeout=config.ollama.status_timeout)
         r.raise_for_status()
@@ -31,7 +31,7 @@ def _check_ollama_server() -> None:
             "Please start the Ollama server and try again.")
 
 
-def _check_model_installed(model: str) -> None:
+def _check_model_installed(model: str, config: Config) -> None:
     check_model = model if ":" in model else f"{model}:latest"
     try:
         tags_resp = httpx.get(f"{config.ollama.base_url}/api/tags",
