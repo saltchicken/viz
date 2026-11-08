@@ -665,7 +665,7 @@ def run_preflight_checks(model: str) -> None:
         sys.exit(f"[Ollama Error] Failed to verify installed models: {e}")
 
 
-if __name__ == "__main__":
+def main():
     target_model = sys.argv[1] if len(sys.argv) > 1 else "qwen3.8:27b"
     run_preflight_checks(target_model)
 
@@ -674,3 +674,7 @@ if __name__ == "__main__":
         app.run()
     finally:
         app.cleanup()
+
+
+if __name__ == "__main__":
+    main()
