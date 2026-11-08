@@ -15,3 +15,6 @@ dependencies = [
 
 [project.scripts]
 viz = "viz.__main__:main"
+
+[tool.setuptools.package-data]
+viz = ["*.tcss"]
