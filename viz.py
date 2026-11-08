@@ -25,6 +25,7 @@ from textual.widgets import Label
 from textual.widgets import Markdown
 from textual.widgets import Select
 from textual.widgets import Static
+from textual.widgets import Switch
 from textual.widgets import TextArea
 from textual.worker import get_current_worker
 # Use textual-image for native Kitty/Sixel terminal pixel rendering
@@ -145,6 +146,34 @@ class ThinkingModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ChatMessage(Vertical):
+    """A container holding both Markdown and Raw text views."""
+    
+    def __init__(self, raw_text: str, role: str, model_name: str = "", is_markdown: bool = True, **kwargs):
+        super().__init__(**kwargs)
+        self.raw_text = raw_text
+        self.role = role
+        self.model_name = model_name
+        self.is_markdown = is_markdown
+
+    def compose(self) -> ComposeResult:
+        prefix_md = "**You:**\n\n" if self.role == "user" else f"**Ollama ({self.model_name}):**\n\n"
+        prefix_raw = "You:\n\n" if self.role == "user" else f"Ollama ({self.model_name}):\n\n"
+        
+        self.md_view = Markdown(f"{prefix_md}{self.raw_text}")
+        self.raw_view = Static(f"{prefix_raw}{self.raw_text}")
+        
+        self.md_view.display = self.is_markdown
+        self.raw_view.display = not self.is_markdown
+        
+        yield self.md_view
+        yield self.raw_view
+
+    def toggle_view(self, show_markdown: bool) -> None:
+        self.md_view.display = show_markdown
+        self.raw_view.display = not show_markdown
+
+
 class OllamaVisionApp(App):
     CSS = """
     #main-split {
@@ -165,6 +194,24 @@ class OllamaVisionApp(App):
         text-style: bold;
         color: $accent;
         margin-bottom: 1;
+    }
+    #chat-header {
+        height: 3;
+        margin-bottom: 1;
+    }
+    #chat-header-title {
+        width: 1fr;
+        content-align: left middle;
+    }
+    #toggle-container {
+        width: auto;
+        height: 3;
+        align: right middle;
+    }
+    #toggle-container Label {
+        margin-top: 1;
+        margin-left: 1;
+        margin-right: 1;
     }
     #preview-state {
         height: auto;
@@ -196,17 +243,18 @@ class OllamaVisionApp(App):
         padding: 1;
         margin-bottom: 1;
     }
+    ChatMessage {
+        height: auto;
+        padding: 1;
+        margin-bottom: 1;
+    }
     .user-msg {
         background: $boost;
         border-left: thick $primary;
-        padding: 1;
-        margin-bottom: 1;
     }
     .assistant-msg {
         background: $surface;
         border-left: thick $success;
-        padding: 1;
-        margin-bottom: 1;
     }
     """
 
@@ -261,7 +309,13 @@ class OllamaVisionApp(App):
 
             # Right Panel: Markdown Chat History
             with Vertical(id="chat-panel"):
-                yield Label("Conversation History", classes="section-title")
+                with Horizontal(id="chat-header"):
+                    yield Label("Conversation History", id="chat-header-title", classes="section-title")
+                    with Horizontal(id="toggle-container"):
+                        yield Label("Raw")
+                        yield Switch(value=True, id="view-toggle")
+                        yield Label("MD")
+                
                 with VerticalScroll(id="chat-scroll"):
                     yield Static(
                         "Attach images and enter a prompt on the left to start chatting.",
@@ -271,8 +325,14 @@ class OllamaVisionApp(App):
     def on_mount(self) -> None:
         self.update_preview()
 
+    @on(Switch.Changed, "#view-toggle")
+    def on_view_toggle(self, event: Switch.Changed) -> None:
+        """Toggle Markdown and Raw views across all rendered messages."""
+        show_markdown = event.value
+        for msg in self.query(ChatMessage):
+            msg.toggle_view(show_markdown)
+
     def get_attached_images(self) -> list[Path]:
-        """Return attached images sorted chronologically by when they were added."""
         return sorted(self.img_dir.glob("*.png"),
                       key=lambda p: p.stat().st_mtime)
 
@@ -298,10 +358,8 @@ class OllamaVisionApp(App):
         preview_path = self.tmp_dir / "preview.png"
 
         if count == 1:
-            # Show single image directly at full resolution
             img_widget.image = png_files[0]
         else:
-            # Stitch multiple images into a high-res gallery preview
             cmd = ["magick", "montage"
                   ] if shutil.which("magick") else ["montage"]
             subprocess.run([
@@ -334,7 +392,6 @@ class OllamaVisionApp(App):
         timestamp = datetime.now().strftime("%s%f")
         img_file = self.img_dir / f"shot_{timestamp}.png"
 
-        # Suspend the TUI temporarily so slurp/grim can grab the screen cleanly
         with self.suspend():
             slurp = subprocess.run(["slurp"], capture_output=True, text=True)
             if slurp.returncode == 0 and slurp.stdout.strip():
@@ -417,11 +474,9 @@ class OllamaVisionApp(App):
             self.notify("Prompt cannot be empty.", severity="error")
             return
 
-        # Remove initial hint if present
         for hint in self.query("#empty-chat-hint"):
             hint.remove()
 
-        # Build message payload
         msg_entry: dict = {"role": "user", "content": prompt}
         if self.first_turn:
             png_files = self.get_attached_images()
@@ -435,24 +490,21 @@ class OllamaVisionApp(App):
             self.query_one("#prompt-label", Label).update("Follow-up Question:")
 
         self.messages.append(msg_entry)
-
-        # Mount User Message in Chat UI
+        
+        is_markdown = self.query_one("#view-toggle", Switch).value
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        user_md = Markdown(f"**You:**\n\n{prompt}", classes="user-msg")
+        user_md = ChatMessage(raw_text=prompt, role="user", is_markdown=is_markdown, classes="user-msg")
         chat_scroll.mount(user_md)
         chat_scroll.scroll_end(animate=False)
 
-        # Clear input for next turn
         self.query_one("#prompt-input", TextArea).clear()
         self.query_one("#preset-select", Select).value = "Custom"
 
-        # Show Thinking Modal & start background API worker
         self.thinking_modal = ThinkingModal(prompt)
 
         def on_modal_close(completed_normally: bool | None) -> None:
             if completed_normally is False and self.active_worker:
                 self.active_worker.cancel()
-                # Roll back the unanswered user message from history
                 if self.messages and self.messages[-1]["role"] == "user":
                     self.messages.pop()
                 user_md.remove()
@@ -501,13 +553,11 @@ class OllamaVisionApp(App):
                         severity="error")
             return
 
-        # Save to history
         self.messages.append({"role": "assistant", "content": content})
 
-        # Render Markdown in Chat UI
+        is_markdown = self.query_one("#view-toggle", Switch).value
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        assistant_md = Markdown(f"**Ollama ({self.model}):**\n\n{content}",
-                                classes="assistant-msg")
+        assistant_md = ChatMessage(raw_text=content, role="assistant", model_name=self.model, is_markdown=is_markdown, classes="assistant-msg")
         chat_scroll.mount(assistant_md)
         chat_scroll.scroll_end(animate=True)
         self.notify("Response received.")
@@ -517,8 +567,6 @@ class OllamaVisionApp(App):
 
 
 def run_preflight_checks(model: str) -> None:
-    """Replicates steps 2, 3, and 3b of viz.sh before launching the TUI."""
-    # 2. Dependency Checks
     required_cmds = ["grim", "slurp", "wl-paste"]
     for cmd in required_cmds:
         if not shutil.which(cmd):
@@ -531,7 +579,6 @@ def run_preflight_checks(model: str) -> None:
             "[Missing Dependency] ImageMagick is required. Please install 'imagemagick'."
         )
 
-    # 3. Check if Ollama is running
     try:
         r = requests.get("http://localhost:11434", timeout=2)
         r.raise_for_status()
@@ -540,7 +587,6 @@ def run_preflight_checks(model: str) -> None:
             "[Ollama Not Found] Ollama is not running on localhost:11434.\n"
             "Please start the Ollama server and try again.")
 
-    # 3b. Check if the specified model is downloaded
     check_model = model if ":" in model else f"{model}:latest"
     try:
         tags_resp = requests.get("http://localhost:11434/api/tags",
