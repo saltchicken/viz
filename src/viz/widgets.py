@@ -63,6 +63,8 @@ class CommandApproval(Vertical):
         for btn in self.query(Button):
             btn.disabled = True
 
+    def on_mount(self) -> None:
+        self.query_one("#btn-decline-cmd", Button).focus()
 
 class ChatMessage(Vertical):
     """A container holding both Markdown and Raw text views, supporting live streaming."""
