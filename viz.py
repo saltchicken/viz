@@ -186,7 +186,7 @@ class ChatMessage(Vertical):
                     yield Markdown(chunk, classes="md-chunk")
                     yield CopyCodeButton(
                         inner_code, 
-                        label=f"📋 Copy Code {code_idx}", 
+                        label=f"📋", 
                         classes="copy-code-btn inline-copy-btn",
                         variant="primary"
                     )
@@ -312,7 +312,7 @@ class OllamaVisionApp(App):
         margin-bottom: 0;
     }
     .inline-copy-btn {
-        min-width: 14;
+        min-width: 4;
         margin-top: 0;
         margin-bottom: 1;
         border: none;
