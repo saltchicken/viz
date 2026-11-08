@@ -59,6 +59,67 @@ update_preview() {
   fi
 }
 
+#!/usr/bin/env bash
+
+# 1. Configurable Model
+MODEL="${1:-qwen3.8:27b}"
+
+# 2. Dependency Checks
+for cmd in grim slurp yad jq curl wl-copy wl-paste base64 mktemp; do
+  if ! command -v "$cmd" &>/dev/null; then
+    yad --center --title="Missing Dependency" --text="Required command '$cmd' is not installed." --button="OK:0"
+    exit 1
+  fi
+done
+
+if ! command -v magick &>/dev/null && ! command -v convert &>/dev/null; then
+  yad --center --title="Missing Dependency" --text="ImageMagick is required for UI scaling.\nPlease install 'imagemagick'." --button="OK:0"
+  exit 1
+fi
+
+# 3. Check if Ollama is running
+if ! curl -s --connect-timeout 2 http://localhost:11434 >/dev/null; then
+  yad --center --title="Ollama Not Found" --text="Ollama is not running on localhost:11434.\nPlease start the Ollama server and try again." --button="OK:0"
+  exit 1
+fi
+
+# 4. Secure Temporary Directory & Setup
+TMP_DIR=$(mktemp -d -t ollama-vision-XXXXXX)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+IMG_DIR="$TMP_DIR/images"
+mkdir -p "$IMG_DIR"
+
+PREVIEW_PATH="$TMP_DIR/preview.png"
+JSON_PATH="$TMP_DIR/shot.json"
+RESP_PATH="$TMP_DIR/shot.resp.json"
+CHAT_LOG="$TMP_DIR/chat.txt"
+MESSAGES_PATH="$TMP_DIR/messages.json"
+IMAGES_JSON_FILE="$TMP_DIR/images_array.json"
+
+echo "[]" >"$MESSAGES_PATH"
+
+# ImageMagick wrappers to support both v6 and v7
+im_convert() {
+  if command -v magick &>/dev/null; then magick "$@"; else convert "$@"; fi
+}
+im_montage() {
+  if command -v magick &>/dev/null; then magick montage "$@"; else montage "$@"; fi
+}
+
+# 5. Function to generate the UI preview
+update_preview() {
+  local count=$(ls -1q "$IMG_DIR"/*.png 2>/dev/null | wc -l)
+  if [ "$count" -eq 0 ]; then
+    # Generate a placeholder if no images are captured yet
+    im_convert -size 600x150 xc:"#222222" -gravity center -pointsize 18 -fill "#EEEEEE" \
+      -annotate +0+0 "No Images Captured\nClick 'Capture Image' or 'Add File' to attach" "$PREVIEW_PATH"
+  else
+    # Stitch all captured images into a tidy gallery preview
+    im_montage -background transparent -geometry "150x150>+5+5" "$IMG_DIR"/*.png "$PREVIEW_PATH"
+  fi
+}
+
 # 6. Main Preparation Loop
 PRESETS="^Custom!Describe this image in detail.!Extract all the text from this image.!Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt."
 CURRENT_CUSTOM=""
@@ -78,6 +139,7 @@ while true; do
     --field="Custom Prompt (Multiline):TXT" "$CURRENT_CUSTOM" \
     --width=700 --height=600 \
     --button="Add File:4" \
+    --button="Paste Image:5" \
     --button="Capture Image:2" \
     --button="Clear Images:3" \
     --button="Cancel:1" \
@@ -95,8 +157,18 @@ while true; do
   if [ $RET -eq 1 ] || [ $RET -eq 252 ]; then
     # Cancel / Window closed
     exit 0
+  elif [ $RET -eq 5 ]; then
+    # Paste Image from Clipboard
+    IMG_FILE="$IMG_DIR/paste_$(date +%s%N).png"
+    wl-paste -t image/png >"$IMG_FILE" 2>/dev/null
+
+    # Check if file was created and is not empty
+    if [ ! -s "$IMG_FILE" ]; then
+      rm -f "$IMG_FILE"
+      yad --center --title="Clipboard Error" --text="No image found in clipboard." --button="OK:0"
+    fi
   elif [ $RET -eq 4 ]; then
-    # Add Image via File Explorer (Fixed module name to --file)
+    # Add Image via File Explorer
     SELECTED_FILES=$(yad --file --multiple --separator="|" --title="Select Image(s)")
 
     if [ -n "$SELECTED_FILES" ]; then
