@@ -1,4 +1,3 @@
-# src/viz/app.py
 from pathlib import Path
 
 from textual import on
@@ -17,19 +16,21 @@ from textual.widgets import Static
 from textual.widgets import Switch
 from textual.widgets import TextArea
 from textual.worker import get_current_worker
+from textual.worker import Worker
 from textual_image.widget import Image as TextualImage
 
 from viz.modals import FileSelectModal
-from viz.modals import ThinkingModal
 from viz.services import ImageWorkspace
-from viz.services import query_ollama_chat
+from viz.services import stream_ollama_chat
 from viz.widgets import ChatMessage
 
 PRESETS = [
     ("Custom", "Custom"),
     ("Describe this image in detail.", "Describe this image in detail."),
-    ("Extract all the text from this image.",
-     "Extract all the text from this image."),
+    (
+        "Extract all the text from this image.",
+        "Extract all the text from this image.",
+    ),
     (
         "Create FLUX3 Prompt",
         "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt.",
@@ -42,7 +43,9 @@ class OllamaVisionApp(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+s", "ask_ollama", "Ask / Send"),
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
+        ("escape", "cancel_stream", "Cancel Stream"),
         ("ctrl+o", "toggle_layout", "Toggle Layout"),
     ]
 
@@ -54,8 +57,9 @@ class OllamaVisionApp(App):
 
         self.messages: list[dict] = []
         self.first_turn = True
-        self.active_worker = None
-        self.thinking_modal: ThinkingModal | None = None
+        self.active_worker: Worker | None = None
+        self.streaming_msg_widget: ChatMessage | None = None
+        self.last_user_msg_widget: ChatMessage | None = None
 
         # 0: Split View, 1: Prep Panel Only, 2: Chat Panel Only
         self.layout_mode = 0
@@ -81,26 +85,32 @@ class OllamaVisionApp(App):
                 yield Button("Clear", id="btn-clear", variant="warning")
 
             yield Label("Select Preset:")
-            yield Select(PRESETS,
-                         value="Custom",
-                         id="preset-select",
-                         allow_blank=False)
+            yield Select(
+                PRESETS,
+                value="Custom",
+                id="preset-select",
+                allow_blank=False,
+            )
 
             yield Label("Prompt (Multiline):", id="prompt-label")
             yield TextArea(id="prompt-input")
 
             with Horizontal(classes="btn-row"):
-                yield Button("Ask Ollama (Ctrl+S)",
-                             id="btn-ask",
-                             variant="success")
+                yield Button(
+                    "Ask Ollama (Ctrl+S)",
+                    id="btn-ask",
+                    variant="success",
+                )
                 yield Button("Reset Chat", id="btn-reset", variant="error")
 
     def _compose_chat_panel(self) -> ComposeResult:
         with Vertical(id="chat-panel"):
             with Horizontal(id="chat-header"):
-                yield Label("Conversation History",
-                            id="chat-header-title",
-                            classes="section-title")
+                yield Label(
+                    "Conversation History",
+                    id="chat-header-title",
+                    classes="section-title",
+                )
                 with Horizontal(id="toggle-container"):
                     yield Label("Raw")
                     yield Switch(value=True, id="view-toggle")
@@ -190,18 +200,28 @@ class OllamaVisionApp(App):
 
     @on(Button.Pressed, "#btn-reset")
     def handle_reset(self) -> None:
+        if self.active_worker and self.active_worker.is_running:
+            self.action_cancel_stream()
+
         self.messages.clear()
         self.first_turn = True
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         chat_scroll.remove_children()
         chat_scroll.mount(
-            Static("Chat reset. Attach images and ask a question.",
-                   id="empty-chat-hint"))
+            Static(
+                "Chat reset. Attach images and ask a question.",
+                id="empty-chat-hint",
+            ))
         self.query_one("#prompt-label", Label).update("Prompt (Multiline):")
         self.notify("Conversation history cleared.")
 
     @on(Button.Pressed, "#btn-ask")
     def action_ask_ollama(self) -> None:
+        # If a stream is currently running, pressing the button cancels it
+        if self.active_worker and self.active_worker.is_running:
+            self.action_cancel_stream()
+            return
+
         prompt = self._resolve_prompt()
         if not prompt:
             self.notify("Prompt cannot be empty.", severity="error")
@@ -211,19 +231,69 @@ class OllamaVisionApp(App):
             hint.remove()
 
         self.messages.append(self._build_user_message(prompt))
-        user_msg_widget = self._mount_chat_message(prompt,
-                                                   role="user",
-                                                   css_class="user-msg",
-                                                   animate=False)
+        self.last_user_msg_widget = self._mount_chat_message(
+            prompt,
+            role="user",
+            css_class="user-msg",
+            animate=False,
+        )
         self._reset_prompt_inputs()
 
-        self.thinking_modal = ThinkingModal(prompt)
-        self.push_screen(
-            self.thinking_modal,
-            lambda completed: self._on_thinking_modal_closed(
-                completed, user_msg_widget),
+        self.streaming_msg_widget = self._mount_chat_message(
+            "",
+            role="assistant",
+            css_class="assistant-msg",
+            animate=True,
+            streaming=True,
         )
-        self.active_worker = self.fetch_ollama_response()
+        self._set_streaming_ui_state(True)
+        self.active_worker = self.stream_ollama_response()
+
+    def action_cancel_stream(self) -> None:
+        """Cancels an in-progress streaming request."""
+        if not self.active_worker or not self.active_worker.is_running:
+            return
+
+        self.active_worker.cancel()
+        self.active_worker = None
+        self._set_streaming_ui_state(False)
+
+        if self.streaming_msg_widget is not None:
+            partial_text = self.streaming_msg_widget.raw_text.strip()
+            if partial_text:
+                # Keep the partial response in history so context isn't lost
+                self.streaming_msg_widget.append_chunk(
+                    "\n\n*[Generation cancelled]*")
+                self.streaming_msg_widget.finalize_stream()
+                self.messages.append({
+                    "role": "assistant",
+                    "content": partial_text
+                })
+            else:
+                # Nothing arrived yet: roll back the empty assistant card and user message
+                self.streaming_msg_widget.remove()
+                if self.last_user_msg_widget is not None:
+                    self.last_user_msg_widget.remove()
+                if self.messages and self.messages[-1]["role"] == "user":
+                    popped = self.messages.pop()
+                    if "images" in popped:
+                        self.first_turn = True
+                        self.query_one("#prompt-label",
+                                       Label).update("Prompt (Multiline):")
+
+            self.streaming_msg_widget = None
+            self.last_user_msg_widget = None
+
+        self.notify("Request cancelled.", severity="warning")
+
+    def _set_streaming_ui_state(self, is_streaming: bool) -> None:
+        ask_btn = self.query_one("#btn-ask", Button)
+        if is_streaming:
+            ask_btn.label = "Cancel (Esc)"
+            ask_btn.variant = "error"
+        else:
+            ask_btn.label = "Ask Ollama (Ctrl+S)"
+            ask_btn.variant = "success"
 
     def _resolve_prompt(self) -> str:
         preset_val = self.query_one("#preset-select", Select).value
@@ -242,11 +312,14 @@ class OllamaVisionApp(App):
             self.query_one("#prompt-label", Label).update("Follow-up Question:")
         return msg_entry
 
-    def _mount_chat_message(self,
-                            text: str,
-                            role: str,
-                            css_class: str,
-                            animate: bool = True) -> ChatMessage:
+    def _mount_chat_message(
+        self,
+        text: str,
+        role: str,
+        css_class: str,
+        animate: bool = True,
+        streaming: bool = False,
+    ) -> ChatMessage:
         is_markdown = self.query_one("#view-toggle", Switch).value
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         widget = ChatMessage(
@@ -254,6 +327,7 @@ class OllamaVisionApp(App):
             role=role,
             model_name=self.model if role == "assistant" else "",
             is_markdown=is_markdown,
+            streaming=streaming,
             classes=css_class,
         )
         chat_scroll.mount(widget)
@@ -264,42 +338,68 @@ class OllamaVisionApp(App):
         self.query_one("#prompt-input", TextArea).clear()
         self.query_one("#preset-select", Select).value = "Custom"
 
-    def _on_thinking_modal_closed(self, completed_normally: bool | None,
-                                  user_msg_widget: ChatMessage) -> None:
-        if completed_normally is False and self.active_worker:
-            self.active_worker.cancel()
-            if self.messages and self.messages[-1]["role"] == "user":
-                self.messages.pop()
-            user_msg_widget.remove()
-            self.notify("Request cancelled.", severity="warning")
-
     @work(thread=True)
-    def fetch_ollama_response(self) -> None:
+    def stream_ollama_response(self) -> None:
         worker = get_current_worker()
-        content, error_msg = query_ollama_chat(self.model, self.messages)
+        # Pass a shallow copy of messages so background iteration is thread-safe
+        messages_snapshot = list(self.messages)
+
+        for chunk, error_msg in stream_ollama_chat(self.model,
+                                                   messages_snapshot):
+            if worker.is_cancelled:
+                return
+            if error_msg:
+                self.call_from_thread(self.handle_stream_error, error_msg)
+                return
+            if chunk:
+                self.call_from_thread(self.handle_stream_chunk, chunk)
+
         if not worker.is_cancelled:
-            self.call_from_thread(self.handle_api_result, content, error_msg)
+            self.call_from_thread(self.handle_stream_complete)
 
-    def handle_api_result(self, content: str, error_msg: str | None) -> None:
-        if self.thinking_modal:
-            self.thinking_modal.dismiss(True)
-            self.thinking_modal = None
+    def handle_stream_chunk(self, chunk: str) -> None:
+        if self.streaming_msg_widget is None:
+            return
+        self.streaming_msg_widget.append_chunk(chunk)
+        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
+        chat_scroll.scroll_end(animate=False)
 
-        if error_msg:
-            self.notify(f"API Error: {error_msg}", severity="error", timeout=8)
+    def handle_stream_error(self, error_msg: str) -> None:
+        self._set_streaming_ui_state(False)
+        self.active_worker = None
+
+        if self.streaming_msg_widget is not None:
+            if not self.streaming_msg_widget.raw_text.strip():
+                self.streaming_msg_widget.remove()
+            else:
+                self.streaming_msg_widget.finalize_stream()
+            self.streaming_msg_widget = None
+
+        self.last_user_msg_widget = None
+        self.notify(f"API Error: {error_msg}", severity="error", timeout=8)
+
+    def handle_stream_complete(self) -> None:
+        self._set_streaming_ui_state(False)
+        self.active_worker = None
+
+        if self.streaming_msg_widget is None:
             return
 
-        if not content:
+        final_content = self.streaming_msg_widget.raw_text
+        if not final_content.strip():
+            self.streaming_msg_widget.remove()
+            self.streaming_msg_widget = None
             self.notify("Received empty response from the model.",
                         severity="error")
             return
 
-        self.messages.append({"role": "assistant", "content": content})
-        self._mount_chat_message(content,
-                                 role="assistant",
-                                 css_class="assistant-msg",
-                                 animate=True)
-        self.notify("Response received.")
+        self.streaming_msg_widget.finalize_stream()
+        self.messages.append({"role": "assistant", "content": final_content})
+        self.streaming_msg_widget = None
+        self.last_user_msg_widget = None
+
+        chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
+        chat_scroll.scroll_end(animate=True)
 
     def action_toggle_layout(self) -> None:
         """Cycles through 3 layout modes: Split -> Prep Only -> Chat Only."""
@@ -309,7 +409,6 @@ class OllamaVisionApp(App):
         chat_panel = self.query_one("#chat-panel", Vertical)
 
         if self.layout_mode == 0:
-            # Split View: Show both, remove inline width overrides to let CSS take over
             prep_panel.display = True
             chat_panel.display = True
             prep_panel.styles.width = None
@@ -317,14 +416,12 @@ class OllamaVisionApp(App):
             self.notify("Layout: Split View")
 
         elif self.layout_mode == 1:
-            # Prep Panel Only: Hide chat, force prep to 100% width
             prep_panel.display = True
             chat_panel.display = False
             prep_panel.styles.width = "100%"
             self.notify("Layout: Prep Panel Only")
 
         else:
-            # Chat Panel Only: Hide prep, force chat to 100% width
             prep_panel.display = False
             chat_panel.display = True
             chat_panel.styles.width = "100%"

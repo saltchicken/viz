@@ -1,13 +1,15 @@
 import base64
+from collections.abc import Iterator
 from datetime import datetime
+import json
 import math
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 
-import requests
 from PIL import Image
+import requests
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 
@@ -66,7 +68,7 @@ class ImageWorkspace:
         for idx, img in enumerate(processed_images):
             row = idx // cols
             col = idx % cols
-            
+
             x = margin + col * (cell_w + margin)
             y = margin + row * (cell_h + margin)
 
@@ -75,7 +77,8 @@ class ImageWorkspace:
             offset_y = y + (cell_h - img.height) // 2
 
             # Use the image as its own mask if it has transparency
-            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and
+                                              "transparency" in img.info):
                 canvas.paste(img, (offset_x, offset_y), img.convert("RGBA"))
             else:
                 canvas.paste(img, (offset_x, offset_y))
@@ -138,7 +141,7 @@ class ImageWorkspace:
                     img = img.convert("RGBA")
                 elif img.mode != "RGB":
                     img = img.convert("RGB")
-                
+
                 img.save(dst, format="PNG")
             return True
         except Exception:
@@ -164,3 +167,47 @@ def query_ollama_chat(model: str,
         return content, error_msg
     except Exception as e:
         return "", f"No response or connection timed out: {e}"
+
+
+def stream_ollama_chat(
+    model: str,
+    messages: list[dict],
+    timeout: int = 180,
+) -> Iterator[tuple[str, str | None]]:
+    """Streams a chat request from Ollama, yielding (token_chunk, error_message)."""
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+    }
+    try:
+        with requests.post(
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json=payload,
+                stream=True,
+                timeout=timeout,
+        ) as resp:
+            if resp.status_code != 200:
+                try:
+                    err = resp.json().get("error", resp.text)
+                except Exception:
+                    err = f"HTTP {resp.status_code}: {resp.text}"
+                yield "", err
+                return
+
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line)
+                if error_msg := data.get("error"):
+                    yield "", error_msg
+                    return
+
+                chunk = data.get("message", {}).get("content", "")
+                if chunk:
+                    yield chunk, None
+
+                if data.get("done"):
+                    break
+    except Exception as e:
+        yield "", f"No response or connection timed out: {e}"
