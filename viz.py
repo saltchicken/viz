@@ -267,7 +267,8 @@ class OllamaVisionApp(App):
         self.update_preview()
 
     def update_preview(self) -> None:
-        png_files = sorted(self.img_dir.glob("*.png"))
+        # Sort by modification time so images appear in the exact order they were added
+        png_files = sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
         count = len(png_files)
         state_label = self.query_one("#preview-state", Static)
         img_widget = self.query_one("#preview-image", TextualImage)
@@ -409,7 +410,8 @@ class OllamaVisionApp(App):
         # Build message payload
         msg_entry: dict = {"role": "user", "content": prompt}
         if self.first_turn:
-            png_files = sorted(self.img_dir.glob("*.png"))
+            # Sort by modification time so they are sent to Ollama in the correct order
+            png_files = sorted(self.img_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
             if png_files:
                 b64_images = [
                     base64.b64encode(p.read_bytes()).decode("utf-8")
