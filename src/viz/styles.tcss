@@ -81,6 +81,17 @@ App {
     margin-right: 1;
 }
 
+.toggle-row {
+    height: auto;
+    align: left middle;
+    margin-bottom: 1;
+}
+
+.toggle-row Label {
+    margin-top: 1;
+    margin-right: 1;
+}
+
 #prompt-input {
     height: 1fr;
     min-height: 6;

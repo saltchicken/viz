@@ -133,6 +133,10 @@ class OllamaVisionApp(App):
             yield Label("Context Size:")
             yield Input(value="32768", type="integer", id="ctx-input")
 
+            with Horizontal(classes="toggle-row"):
+                yield Label("Enable Tool Calling:")
+                yield Switch(value=True, id="tools-toggle")
+
             yield Label("Prompt (Multiline):", id="prompt-label")
             yield TextArea(id="prompt-input")
 
@@ -309,10 +313,13 @@ class OllamaVisionApp(App):
 
         ctx_val = self.query_one("#ctx-input", Input).value
         num_ctx = int(ctx_val) if ctx_val.isdigit() else 2048
+        
+        enable_tools = self.query_one("#tools-toggle", Switch).value
 
         self.active_worker = self.stream_ollama_response(
             system_prompt=system_prompt,
-            num_ctx=num_ctx
+            num_ctx=num_ctx,
+            enable_tools=enable_tools
         )
 
     async def action_cancel_stream(self) -> None:
@@ -413,7 +420,7 @@ class OllamaVisionApp(App):
         self.query_one("#preset-select", Select).value = "Custom"
 
     @work
-    async def stream_ollama_response(self, system_prompt: str = "", num_ctx: int = 2048) -> None:
+    async def stream_ollama_response(self, system_prompt: str = "", num_ctx: int = 2048, enable_tools: bool = True) -> None:
         """Native asyncio task running in the Textual event loop."""
         worker = get_current_worker()
 
@@ -432,14 +439,15 @@ class OllamaVisionApp(App):
                 debug_msg["images"] = [f"<base64 data, length: {len(b64)}>" for b64 in msg["images"]]
             debug_messages.append(debug_msg)
 
-        tools = [COMMAND_TOOL]
+        tools = [COMMAND_TOOL] if enable_tools else None
         self.last_api_payload = {
             "model": self.model,
             "messages": debug_messages,
             "options": {"num_ctx": num_ctx},
             "stream": True,
-            "tools": tools
         }
+        if tools:
+            self.last_api_payload["tools"] = tools
 
         ollama_options = {"num_ctx": num_ctx}
         collected_tool_calls = []
