@@ -11,7 +11,6 @@ REQUIRED_COMMANDS = ["grim", "slurp", "wl-paste"]
 def run_preflight_checks(model: str) -> None:
     """Verifies system dependencies, Ollama server status, and model availability."""
     _check_system_binaries()
-    _check_imagemagick()
     _check_ollama_server()
     _check_model_installed(model)
 
@@ -22,13 +21,6 @@ def _check_system_binaries() -> None:
             sys.exit(
                 f"[Missing Dependency] Required command '{cmd}' is not installed."
             )
-
-
-def _check_imagemagick() -> None:
-    if not shutil.which("magick") and not shutil.which("convert"):
-        sys.exit(
-            "[Missing Dependency] ImageMagick is required. Please install 'imagemagick'."
-        )
 
 
 def _check_ollama_server() -> None:

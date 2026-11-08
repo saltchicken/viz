@@ -10,7 +10,8 @@ requires-python = ">=3.10"
 dependencies = [
     "textual",
     "textual-image",
-    "requests"
+    "requests",
+    "pillow"
 ]
 
 [project.scripts]

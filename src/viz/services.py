@@ -1,11 +1,13 @@
 import base64
 from datetime import datetime
+import math
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 
 import requests
+from PIL import Image
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 
@@ -36,19 +38,49 @@ class ImageWorkspace:
         if len(png_files) == 1:
             return png_files[0]
 
-        cmd = ["magick", "montage"] if shutil.which("magick") else ["montage"]
-        subprocess.run(
-            [
-                *cmd,
-                "-background",
-                "#1e1e2e",
-                "-geometry",
-                "400x400>+8+8",
-                *[str(p) for p in png_files],
-                str(self.preview_path),
-            ],
-            capture_output=True,
-        )
+        images = [Image.open(p) for p in png_files]
+        max_w, max_h = 400, 400
+        margin = 8
+
+        # Resize images, keeping aspect ratio
+        processed_images = []
+        for img in images:
+            img.thumbnail((max_w, max_h))
+            processed_images.append(img)
+
+        # Calculate grid size (cols x rows)
+        n = len(processed_images)
+        cols = math.ceil(math.sqrt(n))
+        rows = math.ceil(n / cols)
+
+        # Calculate cell constraints and total canvas size
+        cell_w = max(img.width for img in processed_images)
+        cell_h = max(img.height for img in processed_images)
+
+        canvas_w = cols * cell_w + (cols + 1) * margin
+        canvas_h = rows * cell_h + (rows + 1) * margin
+
+        # Hex #1e1e2e is used to match Textual's typical dark theme backgrounds
+        canvas = Image.new("RGB", (canvas_w, canvas_h), color="#1e1e2e")
+
+        for idx, img in enumerate(processed_images):
+            row = idx // cols
+            col = idx % cols
+            
+            x = margin + col * (cell_w + margin)
+            y = margin + row * (cell_h + margin)
+
+            # Center the image within its designated grid cell
+            offset_x = x + (cell_w - img.width) // 2
+            offset_y = y + (cell_h - img.height) // 2
+
+            # Use the image as its own mask if it has transparency
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                canvas.paste(img, (offset_x, offset_y), img.convert("RGBA"))
+            else:
+                canvas.paste(img, (offset_x, offset_y))
+
+        canvas.save(self.preview_path)
         return self.preview_path
 
     def capture_screen_region(self) -> bool:
@@ -99,9 +131,18 @@ class ImageWorkspace:
 
     @staticmethod
     def _convert_image(src: Path, dst: Path) -> bool:
-        cmd = "magick" if shutil.which("magick") else "convert"
-        res = subprocess.run([cmd, str(src), str(dst)], capture_output=True)
-        return res.returncode == 0
+        try:
+            with Image.open(src) as img:
+                # Convert to RGBA if necessary to preserve transparency
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGBA")
+                elif img.mode != "RGB":
+                    img = img.convert("RGB")
+                
+                img.save(dst, format="PNG")
+            return True
+        except Exception:
+            return False
 
 
 def query_ollama_chat(model: str,
