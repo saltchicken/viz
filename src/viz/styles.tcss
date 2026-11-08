@@ -16,22 +16,15 @@ App {
     color: #cdd6f4;
 }
 
-*/
-
 /* Main Application Layout */
-#main-split {
-    height: 1fr;
-}
-
 #prep-panel {
-    width: 42%;
+    width: 1fr;
     height: 1fr;
-    border-right: solid $primary;
     padding: 1;
 }
 
 #chat-panel {
-    width: 58%;
+    width: 1fr;
     height: 1fr;
     padding: 1;
 }

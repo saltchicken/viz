@@ -67,7 +67,7 @@ class OllamaVisionApp(App):
 
     BINDINGS = [
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
-        ("ctrl+o", "toggle_layout", "Toggle Layout"),
+        ("ctrl+o", "toggle_view", "Toggle View"),
         ("ctrl+1", "show_debug", "Debug API"),
         ("ctrl+q", "quit", "Quit"),
     ]
@@ -85,15 +85,22 @@ class OllamaVisionApp(App):
         self.last_user_msg_widget: ChatMessage | None = None
         self.last_api_payload: dict = {}
 
-        # 0: Split View, 1: Prep Panel Only, 2: Chat Panel Only
-        self.layout_mode = 0
+        # "prep" or "chat"
+        self.view = "prep"
 
     def compose(self) -> ComposeResult:
-        # yield Header()
-        with Horizontal(id="main-split"):
-            yield from self._compose_prep_panel()
-            yield from self._compose_chat_panel()
-        # yield Footer()
+        yield from self._compose_prep_panel()
+        yield from self._compose_chat_panel()
+
+    def _set_view(self, view: str) -> None:
+        """Switches visibility between the prep panel and chat panel."""
+        self.view = view
+        prep_panel = self.query_one("#prep-panel", Vertical)
+        chat_panel = self.query_one("#chat-panel", Vertical)
+        prep_panel.display = (view == "prep")
+        chat_panel.display = (view == "chat")
+        if view == "chat":
+            self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
 
     def _compose_prep_panel(self) -> ComposeResult:
         with Vertical(id="prep-panel"):
@@ -107,7 +114,7 @@ class OllamaVisionApp(App):
             with Horizontal(classes="btn-row"):
                 yield Button("Add File", id="btn-add-file")
                 yield Button("Clear", id="btn-clear", variant="warning")
-                
+
             yield Label("System Message:")
             yield Select(
                 config.system_presets,
@@ -122,7 +129,7 @@ class OllamaVisionApp(App):
                 id="preset-select",
                 allow_blank=False,
             )
-            
+
             yield Label("Context Size:")
             yield Input(value="32768", type="integer", id="ctx-input")
 
@@ -158,6 +165,7 @@ class OllamaVisionApp(App):
 
     def on_mount(self) -> None:
         self.update_preview()
+        self._set_view("prep")
         self.query_one("#prompt-input", TextArea).focus()
 
     @on(Switch.Changed, "#view-toggle")
@@ -263,7 +271,7 @@ class OllamaVisionApp(App):
 
         for hint in self.query("#empty-chat-hint"):
             hint.remove()
-            
+
         self.messages.append(self._build_user_message(prompt))
         self.last_user_msg_widget = self._mount_chat_message(
             prompt,
@@ -273,17 +281,19 @@ class OllamaVisionApp(App):
         )
         self._reset_prompt_inputs()
 
+        # Auto-switch to chat view
+        self._set_view("chat")
+
         self._trigger_ollama_turn()
 
     def _trigger_ollama_turn(self) -> None:
         """Sets up the UI to stream an assistant response and fires the worker."""
-        # Block automatic followups if we are waiting for user approvals
         pending_approvals = [
-            cmd for cmd in self.query(CommandApproval) 
+            cmd for cmd in self.query(CommandApproval)
             if not cmd.has_class("resolved")
         ]
         if pending_approvals:
-            return  
+            return
 
         self.streaming_msg_widget = self._mount_chat_message(
             "",
@@ -293,7 +303,7 @@ class OllamaVisionApp(App):
             streaming=True,
         )
         self._set_streaming_ui_state(True)
-        
+
         raw_sys_val = self.query_one("#system-select", Select).value
         system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
 
@@ -317,7 +327,6 @@ class OllamaVisionApp(App):
         if self.streaming_msg_widget is not None:
             partial_text = self.streaming_msg_widget.raw_text.strip()
             if partial_text:
-                # Keep the partial response in history so context isn't lost
                 self.streaming_msg_widget.append_chunk("\n\n*[Generation cancelled]*")
                 self.streaming_msg_widget.finalize_stream()
                 self.messages.append({
@@ -325,7 +334,6 @@ class OllamaVisionApp(App):
                     "content": partial_text
                 })
             else:
-                # Nothing arrived yet: roll back the empty assistant card and user message
                 self.streaming_msg_widget.remove()
                 if self.last_user_msg_widget is not None:
                     self.last_user_msg_widget.remove()
@@ -333,7 +341,7 @@ class OllamaVisionApp(App):
                     popped = self.messages.pop()
                     if "_source_paths" in popped:
                         self.sent_images.difference_update(popped["_source_paths"])
-                        
+
                     if not any("images" in m for m in self.messages):
                         self.query_one("#prompt-label",
                                        Label).update("Prompt (Multiline):")
@@ -361,22 +369,21 @@ class OllamaVisionApp(App):
 
     def _build_user_message(self, prompt: str) -> dict:
         msg_entry: dict = {"role": "user", "content": prompt}
-        
-        # Find images in the workspace that haven't been sent yet
+
         new_images = [
-            p for p in self.workspace.get_attached_images() 
+            p for p in self.workspace.get_attached_images()
             if p not in self.sent_images
         ]
-        
+
         if new_images:
             msg_entry["images"] = [
                 base64.b64encode(p.read_bytes()).decode("utf-8")
                 for p in new_images
             ]
-            msg_entry["_source_paths"] = new_images  # Private tracking key
+            msg_entry["_source_paths"] = new_images
             self.sent_images.update(new_images)
             self.query_one("#prompt-label", Label).update("Follow-up Question:")
-            
+
         return msg_entry
 
     def _mount_chat_message(
@@ -409,9 +416,7 @@ class OllamaVisionApp(App):
     async def stream_ollama_response(self, system_prompt: str = "", num_ctx: int = 2048) -> None:
         """Native asyncio task running in the Textual event loop."""
         worker = get_current_worker()
-        
-        # Filter out internal tracking keys (like '_source_paths') 
-        # before passing the snapshot to the Ollama API
+
         messages_snapshot = [
             {k: v for k, v in msg.items() if not k.startswith("_")}
             for msg in self.messages
@@ -419,15 +424,14 @@ class OllamaVisionApp(App):
 
         if system_prompt.strip():
             messages_snapshot.insert(0, {"role": "system", "content": system_prompt})
-            
-        # Prepare the truncated debug payload so it doesn't freeze the UI rendering huge base64 strings
+
         debug_messages = []
         for msg in messages_snapshot:
             debug_msg = {k: v for k, v in msg.items() if k != "images"}
             if "images" in msg:
                 debug_msg["images"] = [f"<base64 data, length: {len(b64)}>" for b64 in msg["images"]]
             debug_messages.append(debug_msg)
-            
+
         tools = [COMMAND_TOOL]
         self.last_api_payload = {
             "model": self.model,
@@ -441,8 +445,8 @@ class OllamaVisionApp(App):
         collected_tool_calls = []
 
         async for chunk, error_msg, metrics, tool_calls in stream_ollama_chat_async(
-            self.model, 
-            messages_snapshot, 
+            self.model,
+            messages_snapshot,
             options=ollama_options,
             tools=tools
         ):
@@ -460,8 +464,8 @@ class OllamaVisionApp(App):
                 e_count = metrics.get("eval_count", 0)
                 total = p_count + e_count
                 self.notify(
-                    f"Prompt: {p_count} | Response: {e_count} | Total: {total}", 
-                    title="Token Usage", 
+                    f"Prompt: {p_count} | Response: {e_count} | Total: {total}",
+                    title="Token Usage",
                     timeout=5
                 )
 
@@ -503,7 +507,6 @@ class OllamaVisionApp(App):
             self.notify("Received empty response from the model.", severity="error")
             return
         elif not final_content.strip() and tool_calls:
-            # Drop the empty text bubble if it's only a tool call response
             self.streaming_msg_widget.remove()
         else:
             self.streaming_msg_widget.finalize_stream()
@@ -511,13 +514,13 @@ class OllamaVisionApp(App):
         assistant_msg: dict = {"role": "assistant", "content": final_content}
         if tool_calls:
             assistant_msg["tool_calls"] = tool_calls
-            
+
         self.messages.append(assistant_msg)
         self.streaming_msg_widget = None
         self.last_user_msg_widget = None
 
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
-        
+
         if tool_calls:
             for tc in tool_calls:
                 approval = CommandApproval(tool_call=tc)
@@ -527,48 +530,46 @@ class OllamaVisionApp(App):
 
     @on(Button.Pressed, "#btn-accept-cmd")
     async def on_accept_cmd(self, event: Button.Pressed) -> None:
-        # Traverse up the DOM to find the parent CommandApproval widget
         approval_widget = None
         for node in event.button.ancestors:
             if isinstance(node, CommandApproval):
                 approval_widget = node
                 break
-                
+
         if not approval_widget or approval_widget.has_class("resolved"):
             return
-            
+
         approval_widget.add_class("resolved")
         for btn in approval_widget.query(Button):
             btn.disabled = True
-            
+
         tool_call = approval_widget.tool_call
         command = approval_widget.command
-        
+
         self.notify(f"Running: {command}")
-        
+
         try:
-            # Safe asynchronous shell execution, freeing the TUI
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await proc.communicate()
-            
+
             output = stdout.decode()
             if stderr:
                 output += f"\n[STDERR]\n{stderr.decode()}"
         except Exception as e:
             output = f"Error executing command: {str(e)}"
-            
+
         if not output.strip():
             output = "Command executed successfully with no output."
-            
+
         self.messages.append({
             "role": "tool",
             "content": output,
         })
-        
+
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         self._mount_chat_message(
             f"**Command Result:**\n```\n{output}\n```",
@@ -577,12 +578,11 @@ class OllamaVisionApp(App):
             animate=False,
         )
         approval_widget.remove()
-        
+
         self._trigger_ollama_turn()
 
     @on(Button.Pressed, "#btn-decline-cmd")
     def on_decline_cmd(self, event: Button.Pressed) -> None:
-        # Traverse up the DOM to find the parent CommandApproval widget
         approval_widget = None
         for node in event.button.ancestors:
             if isinstance(node, CommandApproval):
@@ -591,16 +591,16 @@ class OllamaVisionApp(App):
 
         if not approval_widget or approval_widget.has_class("resolved"):
             return
-            
+
         approval_widget.add_class("resolved")
         for btn in approval_widget.query(Button):
             btn.disabled = True
-            
+
         self.messages.append({
             "role": "tool",
             "content": "The user declined to run this command.",
         })
-        
+
         chat_scroll = self.query_one("#chat-scroll", VerticalScroll)
         self._mount_chat_message(
             "*Command execution declined by user.*",
@@ -609,35 +609,18 @@ class OllamaVisionApp(App):
             animate=False,
         )
         approval_widget.remove()
-        
+
         self._trigger_ollama_turn()
 
-    def action_toggle_layout(self) -> None:
-        """Cycles through 3 layout modes: Split -> Prep Only -> Chat Only."""
-        self.layout_mode = (self.layout_mode + 1) % 3
-
-        prep_panel = self.query_one("#prep-panel", Vertical)
-        chat_panel = self.query_one("#chat-panel", Vertical)
-
-        if self.layout_mode == 0:
-            prep_panel.display = True
-            chat_panel.display = True
-            prep_panel.styles.width = None
-            chat_panel.styles.width = None
-            self.notify("Layout: Split View")
-
-        elif self.layout_mode == 1:
-            prep_panel.display = True
-            chat_panel.display = False
-            prep_panel.styles.width = "100%"
-            self.notify("Layout: Prep Panel Only")
-
+    def action_toggle_view(self) -> None:
+        """Toggles between the prep panel and the chat panel."""
+        if self.view == "prep":
+            self._set_view("chat")
+            self.notify("View: Chat")
         else:
-            prep_panel.display = False
-            chat_panel.display = True
-            chat_panel.styles.width = "100%"
-            self.notify("Layout: Chat Panel Only")
-            
+            self._set_view("prep")
+            self.notify("View: Prep")
+
     def action_show_debug(self) -> None:
         """Shows the raw API payload of the last request."""
         if not self.last_api_payload:
