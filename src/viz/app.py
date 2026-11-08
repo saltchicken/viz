@@ -110,6 +110,8 @@ class OllamaVisionApp(App):
         chat_panel.display = (view == "chat")
         if view == "chat":
             self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
+        elif view == "prep":
+            self.query_one("#prompt-input", TextArea).focus()
 
     def _compose_prep_panel(self) -> ComposeResult:
         with Vertical(id="prep-panel"):
