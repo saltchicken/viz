@@ -323,14 +323,7 @@ class ExecuteCommandTool(BaseTool):
 
     def get_schema(self) -> dict:
         allowed_list = ", ".join(self.config.app.allowed_commands)
-        
-        # Dynamically append docs only if the tool is in the allowlist
-        docs = [
-            desc for cmd, desc in self.config.app.command_docs.items() 
-            if cmd in self.config.app.allowed_commands
-        ]
-        custom_docs = "\n\nCUSTOM COMMAND USAGE:\n" + "\n".join(docs) if docs else ""
-        
+
         return {
             "type": "function",
             "function": {
@@ -340,7 +333,6 @@ class ExecuteCommandTool(BaseTool):
                     f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
                     "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
                     "Chaining and redirection are completely disabled and will cause the command to fail."
-                    f"{custom_docs}"
                 ),
                 "parameters": {
                     "type": "object",
@@ -382,6 +374,63 @@ class ExecuteCommandTool(BaseTool):
             output = "Command executed successfully with no output."
 
         return output, f"**Command Result:**\n```\n{output}\n```"
+
+
+class ContextTool(BaseTool):
+    name = "context"
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Retrieves project directory structures and file contents. "
+                    "Use this to explore the codebase and read file contents before answering questions."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_path": {
+                            "type": "string",
+                            "description": "Optional relative path to a specific file or directory (defaults to current directory)."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        }
+
+    def format_approval(self, args: dict) -> str:
+        target = args.get("target_path", "").strip()
+        return f"context {target}".strip()
+
+    async def execute(self, args: dict) -> tuple[str, str]:
+        target = args.get("target_path", "").strip()
+
+        if target.startswith("/") or ".." in target:
+            error_msg = f"Path traversal blocked: '{target}'. Must operate in the current directory."
+            return f"Security Policy Violation: {error_msg}", f"**Context Blocked (Security):**\n```\n{error_msg}\n```"
+
+        cmd = ["context", target] if target else ["context"]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode()
+            if stderr:
+                output += f"\n[STDERR]\n{stderr.decode()}"
+        except Exception as e:
+            output = f"Error executing context: {str(e)}"
+
+        if not output.strip():
+            output = "Context executed successfully with no output."
+
+        return output, f"**Context Result:**\n```\n{output}\n```"
 
 
 class EditFileTool(BaseTool):
@@ -498,6 +547,7 @@ class ToolRegistry:
         self.tools: dict[str, BaseTool] = {}
         # Register core tools
         self.register(ExecuteCommandTool(config))
+        self.register(ContextTool())
         self.register(EditFileTool())
         self.register(CreateFileTool())
 

@@ -19,7 +19,6 @@ class AppSettings:
     allowed_commands: list[str] = field(
         default_factory=lambda:
         ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"])
-    command_docs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

@@ -1,11 +1,7 @@
 [app]
 default_model = "qwen3.8:27b"
 required_commands = ["grim", "slurp", "wl-paste"]
-allowed_commands = ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc", "context"]
-
-# Map your custom command names to their LLM instructions
-[app.command_docs]
-context = "- `context [target_path]`: Retrieves project directory structures and file contents. Use this to explore the codebase and read file contents before answering questions."
+allowed_commands = ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"]
 
 [ollama]
 base_url = "http://localhost:11434"
