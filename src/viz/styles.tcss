@@ -112,11 +112,18 @@ ChatMessage {
 
 .md-view-container {
     height: auto;
+    margin: 0;
+    padding: 0;
 }
 
 .md-chunk {
     height: auto;
-    margin-bottom: 0;
+    margin: 0;
+}
+
+.md-chunk MarkdownParagraph {
+    margin-top: 0;
+    margin-bottom: 1;
 }
 
 /* FileSelectModal */

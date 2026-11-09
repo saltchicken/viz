@@ -115,16 +115,14 @@ class ChatMessage(Vertical):
         self._update_throttle: float = 0.1  # Update markdown at most every 100ms
 
     def compose(self) -> ComposeResult:
-        prefix_md, prefix_raw = self._get_role_prefixes()
-
         with Vertical(classes="md-view-container"):
             if self.streaming:
-                self._streaming_md = Markdown(f"{prefix_md}{self.raw_text}", classes="md-chunk")
+                self._streaming_md = Markdown(self.raw_text, classes="md-chunk")
                 yield self._streaming_md
             else:
-                yield from self._build_markdown_widgets(self.raw_text, prefix_md)
+                yield from self._build_markdown_widgets(self.raw_text)
 
-        self.raw_view = Static(f"{prefix_raw}{self.raw_text}", markup=False)
+        self.raw_view = Static(self.raw_text, markup=False)
         yield self.raw_view
 
         if self.streaming and not self.raw_text:
@@ -134,21 +132,9 @@ class ChatMessage(Vertical):
             )
             yield self._status_label
 
-    def _get_role_prefixes(self) -> tuple[str, str]:
-        if self.role == "user":
-            return "**You:**\n\n", "You:\n\n"
-        if self.role in ("system", "tool"):
-            return "**System:**\n\n", "System:\n\n"
-        return (
-            f"**Ollama ({self.model_name}):**\n\n",
-            f"Ollama ({self.model_name}):\n\n",
-        )
-
-    def _build_markdown_widgets(self, text: str, prefix_md: str) -> list[Markdown]:
+    def _build_markdown_widgets(self, text: str) -> list[Markdown]:
         """DRY method for chunking text safely by block formatting and converting them to Markdown Widgets."""
         chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", text, flags=re.MULTILINE)
-        if chunks:
-            chunks[0] = prefix_md + chunks[0]
 
         widgets = []
         for chunk in chunks:
@@ -173,16 +159,15 @@ class ChatMessage(Vertical):
             self._status_label = None
 
         self.raw_text += chunk
-        prefix_md, prefix_raw = self._get_role_prefixes()
 
         # Update the raw text view immediately (very cheap operation)
-        self.raw_view.update(f"{prefix_raw}{self.raw_text}")
-        
+        self.raw_view.update(self.raw_text)
+
         # Throttle updates to the Markdown view to avoid quadratic CPU blocking
         if self._streaming_md is not None:
             now = time.monotonic()
             if now - self._last_md_update > self._update_throttle:
-                self._streaming_md.update(f"{prefix_md}{self.raw_text}")
+                self._streaming_md.update(self.raw_text)
                 self._last_md_update = now
 
     async def finalize_stream(self) -> None:
@@ -192,11 +177,9 @@ class ChatMessage(Vertical):
             self._status_label.remove()
             self._status_label = None
 
-        prefix_md, _ = self._get_role_prefixes()
-
         if "```" not in self.raw_text:
             if self._streaming_md is not None:
-                self._streaming_md.update(f"{prefix_md}{self.raw_text}")
+                self._streaming_md.update(self.raw_text)
             return
 
         md_container = self.query_one(".md-view-container", Vertical)
@@ -206,7 +189,7 @@ class ChatMessage(Vertical):
         self._streaming_md = None
                 
         # Safely mount all assembled widgets in a single pass
-        widgets_to_mount = self._build_markdown_widgets(self.raw_text, prefix_md)
+        widgets_to_mount = self._build_markdown_widgets(self.raw_text)
         await md_container.mount_all(widgets_to_mount)
 
     @staticmethod
