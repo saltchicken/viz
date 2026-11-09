@@ -13,7 +13,7 @@
 */
 
 App {
-    background: #1e1e2e;
+    background: #1b2028;
     color: #cdd6f4;
 }
 
