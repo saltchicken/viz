@@ -133,7 +133,7 @@ class OllamaVisionApp(App):
                 yield Label("Enable Tool Calling:")
                 yield Switch(value=True, id="tools-toggle")
 
-            yield Label("Prompt (Multiline):", id="prompt-label")
+            yield Label("Prompt:", id="prompt-label")
             yield TextArea(id="prompt-input")
 
             with Horizontal(classes="btn-row"):
@@ -256,7 +256,7 @@ class OllamaVisionApp(App):
                 id="empty-chat-hint",
             )
         )
-        self.prompt_label.update("Prompt (Multiline):")
+        self.prompt_label.update("Prompt:")
         self.notify("Conversation history cleared.")
 
     @on(Button.Pressed, "#btn-ask")
@@ -342,7 +342,7 @@ class OllamaVisionApp(App):
                         self.sent_images.difference_update(popped["_source_paths"])
 
                 if not any("images" in m for m in self.messages):
-                    self.prompt_label.update("Prompt (Multiline):")
+                    self.prompt_label.update("Prompt:")
 
             self.streaming_msg_widget = None
             self.last_user_msg_widget = None
