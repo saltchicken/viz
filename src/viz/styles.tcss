@@ -1,36 +1,21 @@
-/* Override global theme variables */
+$panel-background: #12151A;
 
-/*
-    $primary: #cba6f7;
-    $primary-darken-1: #b4befe;
-
-    $success: #a6e3a1;
-    $warning: #f9e2af;
-    $error: #f38ba8;
-
-    $surface: #313244;
-    $surface-lighten-1: #45475a;
-*/
-
-App {
-    background: #1b2028;
-    color: #cdd6f4;
-}
 
 /* Main Application Layout */
 #prep-panel {
     width: 1fr;
     height: 1fr;
     padding: 1;
+    background: $panel-background;
+
 }
 
 #chat-panel {
     width: 1fr;
     height: 1fr;
     padding: 1;
+    background: $panel-background
 }
-
-
 
 #preview-image {
     height: 14;
