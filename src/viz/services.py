@@ -8,8 +8,8 @@ import shlex
 import subprocess
 import tempfile
 
-from PIL import Image
 import httpx
+from PIL import Image
 
 from viz.config import Config
 
@@ -20,7 +20,8 @@ class ImageWorkspace:
     def __init__(self, config: Config) -> None:
         self.config = config
         # TemporaryDirectory automatically cleans up when garbage collected or closed
-        self._temp_dir_obj = tempfile.TemporaryDirectory(prefix="ollama-vision-")
+        self._temp_dir_obj = tempfile.TemporaryDirectory(
+            prefix="ollama-vision-")
         self.tmp_dir = Path(self._temp_dir_obj.name)
         self.img_dir = self.tmp_dir / "images"
         self.img_dir.mkdir(parents=True, exist_ok=True)
@@ -66,7 +67,8 @@ class ImageWorkspace:
         canvas_w = cols * cell_w + (cols + 1) * margin
         canvas_h = rows * cell_h + (rows + 1) * margin
 
-        canvas = Image.new("RGB", (canvas_w, canvas_h), color=self.config.preview.bg_color)
+        canvas = Image.new("RGB", (canvas_w, canvas_h),
+                           color=self.config.preview.bg_color)
 
         for idx, img in enumerate(processed_images):
             row = idx // cols
@@ -151,13 +153,11 @@ class ImageWorkspace:
             return False
 
 
-def _build_ollama_payload(
-    model: str, 
-    messages: list[dict], 
-    stream: bool, 
-    options: dict | None = None, 
-    tools: list[dict] | None = None
-) -> dict:
+def _build_ollama_payload(model: str,
+                          messages: list[dict],
+                          stream: bool,
+                          options: dict | None = None,
+                          tools: list[dict] | None = None) -> dict:
     """DRY helper for building API payload formatting constraints."""
     payload = {
         "model": model,
@@ -178,11 +178,16 @@ async def query_ollama_chat_async(
     options: dict | None = None,
 ) -> tuple[str, str | None]:
     """Sends a chat request to Ollama and returns (content, error_message)."""
-    payload = _build_ollama_payload(model, messages, stream=False, options=options)
+    payload = _build_ollama_payload(model,
+                                    messages,
+                                    stream=False,
+                                    options=options)
 
     try:
-        async with httpx.AsyncClient(timeout=config.ollama.chat_timeout) as client:
-            resp = await client.post(f"{config.ollama.base_url}/api/chat", json=payload)
+        async with httpx.AsyncClient(
+                timeout=config.ollama.chat_timeout) as client:
+            resp = await client.post(f"{config.ollama.base_url}/api/chat",
+                                     json=payload)
             resp.raise_for_status()
             data = resp.json()
             error_msg = data.get("error")
@@ -200,10 +205,15 @@ async def stream_ollama_chat_async(
     tools: list[dict] | None = None,
 ) -> AsyncIterator[tuple[str, str | None, dict | None, list[dict] | None]]:
     """Streams a chat request from Ollama natively, yielding (token_chunk, error_message, metrics, tool_calls)."""
-    payload = _build_ollama_payload(model, messages, stream=True, options=options, tools=tools)
+    payload = _build_ollama_payload(model,
+                                    messages,
+                                    stream=True,
+                                    options=options,
+                                    tools=tools)
 
     try:
-        async with httpx.AsyncClient(timeout=config.ollama.chat_timeout) as client:
+        async with httpx.AsyncClient(
+                timeout=config.ollama.chat_timeout) as client:
             async with client.stream(
                     "POST",
                     f"{config.ollama.base_url}/api/chat",
@@ -229,7 +239,7 @@ async def stream_ollama_chat_async(
                     chunk = data.get("message", {}).get("content", "")
                     tool_calls = data.get("message", {}).get("tool_calls")
                     is_done = data.get("done", False)
-                    
+
                     # Ollama only sends eval counts in the final chunk when done=True
                     metrics = data if is_done else None
 
@@ -242,15 +252,19 @@ async def stream_ollama_chat_async(
         yield "", f"No response or connection timed out: {e}", None, None
 
 
-def get_command_tool_schema(allowed_commands: list[str], command_docs: dict[str, str] | None = None) -> dict:
+def get_command_tool_schema(allowed_commands: list[str],
+                            command_docs: dict[str, str] | None = None) -> dict:
     """Dynamically builds the tool payload schema including the current allowlist."""
     allowed_list = ", ".join(allowed_commands)
     command_docs = command_docs or {}
-    
+
     # Dynamically append docs only if the tool is in the allowlist
-    docs = [desc for cmd, desc in command_docs.items() if cmd in allowed_commands]
-    custom_docs = "\n\nCUSTOM COMMAND USAGE:\n" + "\n".join(docs) if docs else ""
-    
+    docs = [
+        desc for cmd, desc in command_docs.items() if cmd in allowed_commands
+    ]
+    custom_docs = "\n\nCUSTOM COMMAND USAGE:\n" + "\n".join(
+        docs) if docs else ""
+
     return {
         "type": "function",
         "function": {
@@ -260,8 +274,7 @@ def get_command_tool_schema(allowed_commands: list[str], command_docs: dict[str,
                 f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
                 "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
                 "Chaining and redirection are completely disabled and will cause the command to fail."
-                f"{custom_docs}"
-            ),
+                f"{custom_docs}"),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -275,13 +288,16 @@ def get_command_tool_schema(allowed_commands: list[str], command_docs: dict[str,
         }
     }
 
+
 def get_edit_file_tool_schema() -> dict:
     """Dynamically builds the tool payload schema for file editing."""
     return {
         "type": "function",
         "function": {
-            "name": "edit_file",
-            "description": "Edit a file by replacing an exact search string with a new string.",
+            "name":
+                "edit_file",
+            "description":
+                "Edit a file by replacing an exact search string with a new string.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -290,12 +306,16 @@ def get_edit_file_tool_schema() -> dict:
                         "description": "Path to the file to edit."
                     },
                     "search_string": {
-                        "type": "string",
-                        "description": "The exact block of text to search for. Must match the file contents perfectly including whitespace and indentation."
+                        "type":
+                            "string",
+                        "description":
+                            "The exact block of text to search for. Must match the file contents perfectly including whitespace and indentation."
                     },
                     "replace_string": {
-                        "type": "string",
-                        "description": "The new block of text to replace it with."
+                        "type":
+                            "string",
+                        "description":
+                            "The new block of text to replace it with."
                     }
                 },
                 "required": ["file_path", "search_string", "replace_string"]
@@ -304,7 +324,9 @@ def get_edit_file_tool_schema() -> dict:
     }
 
 
-def validate_command(command: str, allowed_commands: list[str]) -> tuple[bool, str, list[str]]:
+def validate_command(
+        command: str,
+        allowed_commands: list[str]) -> tuple[bool, str, list[str]]:
     """Parses the command for vulnerabilities, validates args, and checks against allowlist."""
     if not command.strip():
         return False, "Command is empty.", []

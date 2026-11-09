@@ -3,13 +3,17 @@ import re
 import time
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Label, Markdown, Static
+from textual.containers import Horizontal
+from textual.containers import Vertical
+from textual.widgets import Button
+from textual.widgets import Label
+from textual.widgets import Markdown
+from textual.widgets import Static
 
 
 class CommandApproval(Vertical):
     """Widget to ask user for command execution approval."""
-    
+
     DEFAULT_CSS = """
     CommandApproval {
         background: $boost;
@@ -42,7 +46,7 @@ class CommandApproval(Vertical):
         super().__init__(**kwargs)
         self.tool_call = tool_call
         self.tool_name = tool_call.get("function", {}).get("name", "unknown")
-        
+
         args = tool_call.get("function", {}).get("arguments", {})
         if isinstance(args, str):
             try:
@@ -52,8 +56,9 @@ class CommandApproval(Vertical):
         self.args = args
 
     def compose(self) -> ComposeResult:
-        yield Label(f"⚠️ The AI wants to use a tool: {self.tool_name}", classes="cmd-title")
-        
+        yield Label(f"⚠️ The AI wants to use a tool: {self.tool_name}",
+                    classes="cmd-title")
+
         # Format the display block based on which tool the agent called
         if self.tool_name == "execute_command":
             display_text = self.args.get("command", "")
@@ -61,11 +66,10 @@ class CommandApproval(Vertical):
             display_text = (
                 f"File: {self.args.get('file_path')}\n"
                 f"--- SEARCH ---\n{self.args.get('search_string')}\n"
-                f"--- REPLACE ---\n{self.args.get('replace_string')}"
-            )
+                f"--- REPLACE ---\n{self.args.get('replace_string')}")
         else:
             display_text = json.dumps(self.args, indent=2)
-            
+
         yield Static(display_text, classes="cmd-code")
         with Horizontal(classes="cmd-buttons"):
             yield Button("Decline", id="btn-decline-cmd", variant="error")
@@ -79,6 +83,7 @@ class CommandApproval(Vertical):
 
     def on_mount(self) -> None:
         self.query_one("#btn-decline-cmd", Button).focus()
+
 
 class ChatMessage(Vertical):
     """A container holding both Markdown and Raw text views, supporting live streaming."""
@@ -109,7 +114,7 @@ class ChatMessage(Vertical):
         self.streaming = streaming
         self._streaming_md: Markdown | None = None
         self._status_label: Static | None = None
-        
+
         # State to prevent O(N^2) Markdown widget parsing freeze during high-frequency streaming
         self._last_md_update: float = 0.0
         self._update_throttle: float = 0.1  # Update markdown at most every 100ms
@@ -134,7 +139,9 @@ class ChatMessage(Vertical):
 
     def _build_markdown_widgets(self, text: str) -> list[Markdown]:
         """DRY method for chunking text safely by block formatting and converting them to Markdown Widgets."""
-        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))", text, flags=re.MULTILINE)
+        chunks = re.split(r"(^[ \t]{0,3}```[\s\S]*?(?:^[ \t]{0,3}```|\Z))",
+                          text,
+                          flags=re.MULTILINE)
 
         widgets = []
         for chunk in chunks:
@@ -149,7 +156,7 @@ class ChatMessage(Vertical):
                 widgets.append(Markdown(md_text, classes="md-chunk"))
             else:
                 widgets.append(Markdown(chunk, classes="md-chunk"))
-        
+
         return widgets
 
     def append_chunk(self, chunk: str) -> None:
@@ -183,11 +190,11 @@ class ChatMessage(Vertical):
             return
 
         md_container = self.query_one(".md-view-container", Vertical)
-        
+
         # DOM Operations must be awaited
         await md_container.remove_children()
         self._streaming_md = None
-                
+
         # Safely mount all assembled widgets in a single pass
         widgets_to_mount = self._build_markdown_widgets(self.raw_text)
         await md_container.mount_all(widgets_to_mount)

@@ -66,12 +66,10 @@ class DebugModal(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="debug-dialog"):
             yield Label("[b]Last Request Payload (Images Truncated)[/b]")
-            yield TextArea(
-                json.dumps(self.payload, indent=2),
-                language="json",
-                read_only=True,
-                id="debug-textarea"
-            )
+            yield TextArea(json.dumps(self.payload, indent=2),
+                           language="json",
+                           read_only=True,
+                           id="debug-textarea")
             with Horizontal(classes="modal-buttons"):
                 yield Button("Close", id="close-debug-btn", variant="primary")
 
