@@ -293,6 +293,19 @@ def validate_command(
     return True, "", parsed_cmd
 
 
+def resolve_secure_path(file_path: str) -> Path:
+    """Resolves a file path and ensures it stays within the current working directory."""
+    base_dir = Path.cwd().resolve()
+    p = Path(file_path).resolve()
+
+    if not p.is_relative_to(base_dir):
+        raise PermissionError(
+            "Security Policy Violation: Path traversal blocked. Path must be within the current working directory."
+        )
+    
+    return p
+
+
 class BaseTool(ABC):
     name: str
 
@@ -476,7 +489,8 @@ class EditFileTool(BaseTool):
         replace_str = args.get("replace_string", "")
 
         try:
-            p = Path(file_path)
+            p = resolve_secure_path(file_path)
+
             if not p.exists():
                 raise FileNotFoundError("File does not exist.")
 
@@ -491,6 +505,7 @@ class EditFileTool(BaseTool):
             return f"Successfully edited {file_path}.", f"**File Edited Successfully:** `{file_path}`"
         except Exception as e:
             return f"Error editing file: {str(e)}", f"**Edit Failed:**\n```\n{e}\n```"
+
 
 class CreateFileTool(BaseTool):
     name = "create_file"
@@ -529,7 +544,7 @@ class CreateFileTool(BaseTool):
         content = args.get("content", "")
 
         try:
-            p = Path(file_path)
+            p = resolve_secure_path(file_path)
             
             if p.exists():
                 raise FileExistsError("File already exists. Use edit_file instead.")
@@ -541,6 +556,7 @@ class CreateFileTool(BaseTool):
             return f"Successfully created {file_path}.", f"**File Created Successfully:** `{file_path}`"
         except Exception as e:
             return f"Error creating file: {str(e)}", f"**Creation Failed:**\n```\n{e}\n```"
+
 
 class ToolRegistry:
     def __init__(self, config: Config):
