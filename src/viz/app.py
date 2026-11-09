@@ -445,7 +445,10 @@ class OllamaVisionApp(App):
                 d["images"] = [f"<base64 data, length: {len(b)}>" for b in d["images"]]
             return d
 
-        tools = [get_command_tool_schema(self.config.app.allowed_commands)] if enable_tools else None
+        tools = [get_command_tool_schema(
+            self.config.app.allowed_commands,
+            self.config.app.command_docs
+        )] if enable_tools else None
         self.last_api_payload = {
             "model": self.model,
             "messages": [_strip_images(m) for m in messages_snapshot],

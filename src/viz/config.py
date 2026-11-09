@@ -15,6 +15,7 @@ class AppSettings:
     default_context: int = 32768
     required_commands: list[str] = field(default_factory=lambda: ["grim", "slurp", "wl-paste"])
     allowed_commands: list[str] = field(default_factory=lambda: ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"])
+    command_docs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

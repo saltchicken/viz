@@ -242,20 +242,13 @@ async def stream_ollama_chat_async(
         yield "", f"No response or connection timed out: {e}", None, None
 
 
-def get_command_tool_schema(allowed_commands: list[str]) -> dict:
+def get_command_tool_schema(allowed_commands: list[str], command_docs: dict[str, str] | None = None) -> dict:
     """Dynamically builds the tool payload schema including the current allowlist."""
     allowed_list = ", ".join(allowed_commands)
+    command_docs = command_docs or {}
     
-    # 1. Define documentation for your custom tools
-    command_manuals = {
-        "context": (
-            "- `context [target_path]`: Retrieves project directory structures and file contents. "
-            "Use this to explore the codebase and read file contents before answering questions."
-        )
-    }
-
-    # 2. Dynamically append docs if the tool is in the allowlist
-    docs = [desc for cmd, desc in command_manuals.items() if cmd in allowed_commands]
+    # Dynamically append docs only if the tool is in the allowlist
+    docs = [desc for cmd, desc in command_docs.items() if cmd in allowed_commands]
     custom_docs = "\n\nCUSTOM COMMAND USAGE:\n" + "\n".join(docs) if docs else ""
     
     return {
@@ -267,14 +260,14 @@ def get_command_tool_schema(allowed_commands: list[str]) -> dict:
                 f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
                 "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
                 "Chaining and redirection are completely disabled and will cause the command to fail."
-                f"{custom_docs}" # 3. Inject the instructions here
+                f"{custom_docs}"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The exact command to execute (e.g., 'ls -la' or 'context src/')."
+                        "description": "The exact command to execute."
                     }
                 },
                 "required": ["command"]
