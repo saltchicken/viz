@@ -27,10 +27,6 @@ name = "Extract all the text from this image."
 prompt = "Extract all the text from this image."
 
 [[presets]]
-name = "Nonesense"
-prompt = "A test"
-
-[[presets]]
 name = "Create FLUX3 Prompt"
 prompt = "Create a comprehensive, highly descriptive prompt optimized for the FLUX3 text-to-image model. Include the main subject, artistic style, camera angle, lighting, textures, and mood. Output ONLY the prompt."
 
@@ -39,21 +35,5 @@ name = "Helpful Assistant"
 prompt = "You are a highly capable and helpful AI visual assistant. Provide concise and accurate answers."
 
 [[system_presets]]
-name = "Pirate"
-prompt = "You are a swashbuckling pirate. Answer all queries in pirate speak."
-
-[[system_presets]]
 name = "JSON Only"
 prompt = "You are a data extractor. Only output valid JSON. Do not include any other text, markdown formatting, or explanations."
-
-[[system_presets]]
-name = "Coding Agent"
-prompt = """When editing files, you must use Search and Replace blocks. 
-
-Format your edits exactly like this:
-```python
-<<<<
-[exact lines to replace, including 2 lines of context above and below]
-====
-[new modified lines]
->>>>"""
