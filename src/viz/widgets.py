@@ -6,6 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.containers import Vertical
 from textual.widgets import Button
+from textual.widgets import Input
 from textual.widgets import Label
 from textual.widgets import Markdown
 from textual.widgets import Static
@@ -34,6 +35,9 @@ class CommandApproval(Vertical):
         padding: 1;
         margin-bottom: 1;
         height: auto;
+    }
+    #cmd-feedback-input {
+        margin-bottom: 1;
     }
     .cmd-buttons {
         height: auto;
@@ -70,6 +74,7 @@ class CommandApproval(Vertical):
             display_text = json.dumps(self.args, indent=2)
 
         yield Static(display_text, classes="cmd-code")
+        yield Input(placeholder="Optional message to send with results...", id="cmd-feedback-input")
         
         with Horizontal(classes="cmd-buttons"):
             yield Button("Decline", id="btn-decline-cmd", variant="error")
@@ -80,6 +85,8 @@ class CommandApproval(Vertical):
         self.add_class("resolved")
         for btn in self.query(Button):
             btn.disabled = True
+        for inp in self.query(Input):
+            inp.disabled = True
 
     def on_mount(self) -> None:
         self.query_one("#btn-decline-cmd", Button).focus()

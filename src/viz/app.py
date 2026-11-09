@@ -577,6 +577,12 @@ class OllamaVisionApp(App):
             internal_content = f"Execution crashed: {e}"
             display_text = f"**Tool Crashed:**\n```\n{e}\n```"
 
+        feedback_input = approval_widget.query_one("#cmd-feedback-input", Input)
+        feedback = feedback_input.value.strip() if feedback_input else ""
+        if feedback:
+            internal_content += f"\n\n[User attached a message]: {feedback}"
+            display_text += f"\n\n**User Message:** {feedback}"
+
         self._resolve_command(approval_widget, internal_content, display_text)
 
     @on(Button.Pressed, "#btn-decline-cmd")
@@ -585,9 +591,17 @@ class OllamaVisionApp(App):
         if not approval_widget or approval_widget.has_class("resolved"):
             return
 
-        self._resolve_command(approval_widget,
-                              "The user declined to run this command.",
-                              "*Command execution declined by user.*")
+        feedback_input = approval_widget.query_one("#cmd-feedback-input", Input)
+        feedback = feedback_input.value.strip() if feedback_input else ""
+
+        internal_msg = "The user declined to run this command."
+        display_msg = "*Command execution declined by user.*"
+        
+        if feedback:
+            internal_msg += f" User provided this reason/message: {feedback}"
+            display_msg += f"\n\n**User Message:** {feedback}"
+
+        self._resolve_command(approval_widget, internal_msg, display_msg)
 
     def action_toggle_view(self) -> None:
         """Toggles between the prep panel and the chat panel."""
