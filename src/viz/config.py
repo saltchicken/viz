@@ -19,7 +19,7 @@ class AppSettings:
         default_factory=lambda: ["grim", "slurp", "wl-paste"])
     allowed_commands: list[str] = field(
         default_factory=lambda:
-        ["ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc"])
+        ["ls", "cat", "echo", "pwd", "grep", "head", "tail", "wc"])
 
 
 @dataclass
