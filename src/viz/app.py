@@ -40,6 +40,7 @@ class OllamaVisionApp(App):
     BINDINGS = [
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
         ("ctrl+o", "toggle_view", "Toggle View"),
+        ("ctrl+2", "toggle_md_view", "Toggle MD"),
         ("ctrl+1", "show_debug", "Debug API"),
         ("ctrl+q", "quit", "Quit"),
     ]
@@ -60,6 +61,7 @@ class OllamaVisionApp(App):
 
         # "prep" or "chat"
         self.view = "prep"
+        self.md_enabled: bool = True
 
     # --- UI Component Properties for DRY access ---
     @property
@@ -150,10 +152,6 @@ class OllamaVisionApp(App):
                     id="chat-header-title",
                     classes="section-title",
                 )
-                with Horizontal(id="toggle-container"):
-                    yield Label("Raw")
-                    yield Switch(value=True, id="view-toggle")
-                    yield Label("MD")
 
             with VerticalScroll(id="chat-scroll"):
                 yield Static(
@@ -166,10 +164,11 @@ class OllamaVisionApp(App):
         self._set_view("prep")
         self.prompt_input.focus()
 
-    @on(Switch.Changed, "#view-toggle")
-    def on_view_toggle(self, event: Switch.Changed) -> None:
+    def action_toggle_md_view(self) -> None:
+        self.md_enabled = not self.md_enabled
         for msg in self.query(ChatMessage):
-            msg.toggle_view(event.value)
+            msg.toggle_view(self.md_enabled)
+        self.notify(f"View: {'Markdown' if self.md_enabled else 'Raw'}")
 
     def update_preview(self) -> None:
         png_files = self.workspace.get_attached_images()
@@ -402,7 +401,7 @@ class OllamaVisionApp(App):
         animate: bool = True,
         streaming: bool = False,
     ) -> ChatMessage:
-        is_markdown = self.query_one("#view-toggle", Switch).value
+        is_markdown = self.md_enabled
         widget = ChatMessage(
             raw_text=text,
             role=role,
