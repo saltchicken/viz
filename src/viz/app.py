@@ -28,7 +28,7 @@ from viz.modals import DebugModal
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
-from viz.services import get_command_tool_schema, get_edit_file_tool_schema
+from viz.services import get_command_tool_schema
 from viz.services import get_edit_file_tool_schema
 from viz.services import validate_command
 from viz.widgets import ChatMessage, CommandApproval
@@ -74,10 +74,6 @@ class OllamaVisionApp(App):
     def preset_select(self) -> Select:
         return self.query_one("#preset-select", Select)
         
-    @property
-    def prompt_label(self) -> Label:
-        return self.query_one("#prompt-label", Label)
-
     def compose(self) -> ComposeResult:
         yield from self._compose_prep_panel()
         yield from self._compose_chat_panel()
@@ -256,7 +252,6 @@ class OllamaVisionApp(App):
                 id="empty-chat-hint",
             )
         )
-        self.prompt_label.update("Prompt:")
         self.notify("Conversation history cleared.")
 
     @on(Button.Pressed, "#btn-ask")
@@ -340,9 +335,6 @@ class OllamaVisionApp(App):
                     popped = self.messages.pop()
                     if "_source_paths" in popped:
                         self.sent_images.difference_update(popped["_source_paths"])
-
-                if not any("images" in m for m in self.messages):
-                    self.prompt_label.update("Prompt:")
 
             self.streaming_msg_widget = None
             self.last_user_msg_widget = None
