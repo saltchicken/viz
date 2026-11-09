@@ -75,8 +75,10 @@ class OllamaVisionApp(App):
         return self.query_one("#preset-select", Select)
         
     def compose(self) -> ComposeResult:
+        yield Header()
         yield from self._compose_prep_panel()
         yield from self._compose_chat_panel()
+        yield Footer()
 
     def _set_view(self, view: str) -> None:
         """Switches visibility between the prep panel and chat panel."""
