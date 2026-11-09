@@ -275,6 +275,34 @@ def get_command_tool_schema(allowed_commands: list[str], command_docs: dict[str,
         }
     }
 
+def get_edit_file_tool_schema() -> dict:
+    """Dynamically builds the tool payload schema for file editing."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Edit a file by replacing an exact search string with a new string.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to edit."
+                    },
+                    "search_string": {
+                        "type": "string",
+                        "description": "The exact block of text to search for. Must match the file contents perfectly including whitespace and indentation."
+                    },
+                    "replace_string": {
+                        "type": "string",
+                        "description": "The new block of text to replace it with."
+                    }
+                },
+                "required": ["file_path", "search_string", "replace_string"]
+            }
+        }
+    }
+
 
 def validate_command(command: str, allowed_commands: list[str]) -> tuple[bool, str, list[str]]:
     """Parses the command for vulnerabilities, validates args, and checks against allowlist."""

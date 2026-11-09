@@ -28,7 +28,8 @@ from viz.modals import DebugModal
 from viz.modals import FileSelectModal
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
-from viz.services import get_command_tool_schema
+from viz.services import get_command_tool_schema, get_edit_file_tool_schema
+from viz.services import get_edit_file_tool_schema
 from viz.services import validate_command
 from viz.widgets import ChatMessage, CommandApproval
 
@@ -445,10 +446,17 @@ class OllamaVisionApp(App):
                 d["images"] = [f"<base64 data, length: {len(b)}>" for b in d["images"]]
             return d
 
-        tools = [get_command_tool_schema(
-            self.config.app.allowed_commands,
-            self.config.app.command_docs
-        )] if enable_tools else None
+        # Replace the existing single-tool initialization:
+        tools = []
+        if enable_tools:
+            tools.append(get_command_tool_schema(
+                self.config.app.allowed_commands,
+                self.config.app.command_docs
+            ))
+            tools.append(get_edit_file_tool_schema())
+            
+        tools = tools if tools else None
+
         self.last_api_payload = {
             "model": self.model,
             "messages": [_strip_images(m) for m in messages_snapshot],
@@ -559,43 +567,68 @@ class OllamaVisionApp(App):
         if not approval_widget or approval_widget.has_class("resolved"):
             return
 
-        tool_call = approval_widget.tool_call
-        command = approval_widget.command
+        tool_name = approval_widget.tool_name
+        args = approval_widget.args
 
-        is_secure, error_msg, parsed_cmd = validate_command(command, self.config.app.allowed_commands)
-        if not is_secure:
-            self.notify(f"Security Blocked: {error_msg}", severity="error")
-            self._resolve_command(
-                approval_widget,
-                f"Security Policy Violation: {error_msg}",
-                f"**Command Blocked (Security):**\n```\n{error_msg}\n```"
-            )
-            return
+        # Route 1: Command Execution
+        if tool_name == "execute_command":
+            command = args.get("command", "")
+            is_secure, error_msg, parsed_cmd = validate_command(command, self.config.app.allowed_commands)
+            
+            if not is_secure:
+                self.notify(f"Security Blocked: {error_msg}", severity="error")
+                self._resolve_command(
+                    approval_widget,
+                    f"Security Policy Violation: {error_msg}",
+                    f"**Command Blocked (Security):**\n```\n{error_msg}\n```"
+                )
+                return
 
-        self.notify(f"Running: {command}")
+            self.notify(f"Running: {command}")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *parsed_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+                output = stdout.decode()
+                if stderr:
+                    output += f"\n[STDERR]\n{stderr.decode()}"
+            except Exception as e:
+                output = f"Error executing command: {str(e)}"
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *parsed_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
+            if not output.strip():
+                output = "Command executed successfully with no output."
 
-            output = stdout.decode()
-            if stderr:
-                output += f"\n[STDERR]\n{stderr.decode()}"
-        except Exception as e:
-            output = f"Error executing command: {str(e)}"
+            self._resolve_command(approval_widget, output, f"**Command Result:**\n```\n{output}\n```")
 
-        if not output.strip():
-            output = "Command executed successfully with no output."
-
-        self._resolve_command(
-            approval_widget,
-            output,
-            f"**Command Result:**\n```\n{output}\n```"
-        )
+        # Route 2: Search and Replace Editing
+        elif tool_name == "edit_file":
+            file_path = args.get("file_path", "")
+            search_str = args.get("search_string", "")
+            replace_str = args.get("replace_string", "")
+            
+            try:
+                p = Path(file_path)
+                if not p.exists():
+                    raise FileNotFoundError("File does not exist.")
+                    
+                content = p.read_text(encoding="utf-8")
+                if search_str not in content:
+                    raise ValueError("Exact search string not found in the file.")
+                
+                # Replace only the first occurrence to avoid accidental overwrites
+                new_content = content.replace(search_str, replace_str, 1)
+                p.write_text(new_content, encoding="utf-8")
+                
+                output = f"Successfully edited {file_path}."
+                display_msg = f"**File Edited Successfully:** `{file_path}`"
+            except Exception as e:
+                output = f"Error editing file: {str(e)}"
+                display_msg = f"**Edit Failed:**\n```\n{output}\n```"
+                
+            self._resolve_command(approval_widget, output, display_msg)
 
     @on(Button.Pressed, "#btn-decline-cmd")
     def on_decline_cmd(self, event: Button.Pressed) -> None:
