@@ -26,11 +26,9 @@ from textual_image.widget import Image as TextualImage
 from viz.config import Config
 from viz.modals import DebugModal
 from viz.modals import FileSelectModal
-from viz.services import get_command_tool_schema
-from viz.services import get_edit_file_tool_schema
 from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
-from viz.services import validate_command
+from viz.services import ToolRegistry
 from viz.widgets import ChatMessage
 from viz.widgets import CommandApproval
 
@@ -53,6 +51,7 @@ class OllamaVisionApp(App):
         self.config = config
         self.title = f"Ollama Vision ({self.model})"
         self.workspace = ImageWorkspace(self.config)
+        self.tool_registry = ToolRegistry(self.config)
 
         self.messages: list[dict] = []
         self.sent_images: set[Path] = set()
@@ -444,15 +443,7 @@ class OllamaVisionApp(App):
                 ]
             return d
 
-        # Replace the existing single-tool initialization:
-        tools = []
-        if enable_tools:
-            tools.append(
-                get_command_tool_schema(self.config.app.allowed_commands,
-                                        self.config.app.command_docs))
-            tools.append(get_edit_file_tool_schema())
-
-        tools = tools if tools else None
+        tools = self.tool_registry.get_schemas() if enable_tools else None
 
         self.last_api_payload = {
             "model": self.model,
@@ -503,7 +494,7 @@ class OllamaVisionApp(App):
 
     async def handle_stream_complete(self,
                                      tool_calls: list[dict] | None = None
-                                    ) -> None:
+                                     ) -> None:
         self._set_streaming_ui_state(False)
         self.active_worker = None
 
@@ -532,7 +523,7 @@ class OllamaVisionApp(App):
 
         if tool_calls:
             for tc in tool_calls:
-                approval = CommandApproval(tool_call=tc)
+                approval = CommandApproval(tool_call=tc, tool_registry=self.tool_registry)
                 self.chat_scroll.mount(approval)
 
         self.chat_scroll.scroll_end(animate=True)
@@ -571,65 +562,22 @@ class OllamaVisionApp(App):
         tool_name = approval_widget.tool_name
         args = approval_widget.args
 
-        # Route 1: Command Execution
-        if tool_name == "execute_command":
-            command = args.get("command", "")
-            is_secure, error_msg, parsed_cmd = validate_command(
-                command, self.config.app.allowed_commands)
+        tool = self.tool_registry.get_tool(tool_name)
+        if not tool:
+            self._resolve_command(
+                approval_widget,
+                f"Tool '{tool_name}' not found in registry.",
+                f"**Error:** Tool `{tool_name}` not registered."
+            )
+            return
 
-            if not is_secure:
-                self.notify(f"Security Blocked: {error_msg}", severity="error")
-                self._resolve_command(
-                    approval_widget, f"Security Policy Violation: {error_msg}",
-                    f"**Command Blocked (Security):**\n```\n{error_msg}\n```")
-                return
+        try:
+            internal_content, display_text = await tool.execute(args)
+        except Exception as e:
+            internal_content = f"Execution crashed: {e}"
+            display_text = f"**Tool Crashed:**\n```\n{e}\n```"
 
-            self.notify(f"Running: {command}")
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    *parsed_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE)
-                stdout, stderr = await proc.communicate()
-                output = stdout.decode()
-                if stderr:
-                    output += f"\n[STDERR]\n{stderr.decode()}"
-            except Exception as e:
-                output = f"Error executing command: {str(e)}"
-
-            if not output.strip():
-                output = "Command executed successfully with no output."
-
-            self._resolve_command(approval_widget, output,
-                                  f"**Command Result:**\n```\n{output}\n```")
-
-        # Route 2: Search and Replace Editing
-        elif tool_name == "edit_file":
-            file_path = args.get("file_path", "")
-            search_str = args.get("search_string", "")
-            replace_str = args.get("replace_string", "")
-
-            try:
-                p = Path(file_path)
-                if not p.exists():
-                    raise FileNotFoundError("File does not exist.")
-
-                content = p.read_text(encoding="utf-8")
-                if search_str not in content:
-                    raise ValueError(
-                        "Exact search string not found in the file.")
-
-                # Replace only the first occurrence to avoid accidental overwrites
-                new_content = content.replace(search_str, replace_str, 1)
-                p.write_text(new_content, encoding="utf-8")
-
-                output = f"Successfully edited {file_path}."
-                display_msg = f"**File Edited Successfully:** `{file_path}`"
-            except Exception as e:
-                output = f"Error editing file: {str(e)}"
-                display_msg = f"**Edit Failed:**\n```\n{output}\n```"
-
-            self._resolve_command(approval_widget, output, display_msg)
+        self._resolve_command(approval_widget, internal_content, display_text)
 
     @on(Button.Pressed, "#btn-decline-cmd")
     def on_decline_cmd(self, event: Button.Pressed) -> None:

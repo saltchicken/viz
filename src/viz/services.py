@@ -1,3 +1,6 @@
+from abc import ABC
+from abc import abstractmethod
+import asyncio
 import base64
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -252,77 +255,7 @@ async def stream_ollama_chat_async(
         yield "", f"No response or connection timed out: {e}", None, None
 
 
-def get_command_tool_schema(allowed_commands: list[str],
-                            command_docs: dict[str, str] | None = None) -> dict:
-    """Dynamically builds the tool payload schema including the current allowlist."""
-    allowed_list = ", ".join(allowed_commands)
-    command_docs = command_docs or {}
-
-    # Dynamically append docs only if the tool is in the allowlist
-    docs = [
-        desc for cmd, desc in command_docs.items() if cmd in allowed_commands
-    ]
-    custom_docs = "\n\nCUSTOM COMMAND USAGE:\n" + "\n".join(
-        docs) if docs else ""
-
-    return {
-        "type": "function",
-        "function": {
-            "name": "execute_command",
-            "description": (
-                "Executes a shell command on the user's system. "
-                f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
-                "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
-                "Chaining and redirection are completely disabled and will cause the command to fail."
-                f"{custom_docs}"),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The exact command to execute."
-                    }
-                },
-                "required": ["command"]
-            }
-        }
-    }
-
-
-def get_edit_file_tool_schema() -> dict:
-    """Dynamically builds the tool payload schema for file editing."""
-    return {
-        "type": "function",
-        "function": {
-            "name":
-                "edit_file",
-            "description":
-                "Edit a file by replacing an exact search string with a new string.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to edit."
-                    },
-                    "search_string": {
-                        "type":
-                            "string",
-                        "description":
-                            "The exact block of text to search for. Must match the file contents perfectly including whitespace and indentation."
-                    },
-                    "replace_string": {
-                        "type":
-                            "string",
-                        "description":
-                            "The new block of text to replace it with."
-                    }
-                },
-                "required": ["file_path", "search_string", "replace_string"]
-            }
-        }
-    }
-
+# --- Tool Registry Implementation ---
 
 def validate_command(
         command: str,
@@ -358,3 +291,221 @@ def validate_command(
             return False, f"Path traversal blocked: '{arg}'. Commands must operate in the current directory.", []
 
     return True, "", parsed_cmd
+
+
+class BaseTool(ABC):
+    name: str
+
+    @abstractmethod
+    def get_schema(self) -> dict:
+        """Returns the JSON schema payload for Ollama."""
+        pass
+
+    @abstractmethod
+    def format_approval(self, args: dict) -> str:
+        """Returns the formatted string to display in the approval UI."""
+        pass
+
+    @abstractmethod
+    async def execute(self, args: dict) -> tuple[str, str]:
+        """
+        Executes the tool.
+        Returns (internal_llm_output, user_facing_display_message).
+        """
+        pass
+
+
+class ExecuteCommandTool(BaseTool):
+    name = "execute_command"
+
+    def __init__(self, config: Config):
+        self.config = config
+
+    def get_schema(self) -> dict:
+        allowed_list = ", ".join(self.config.app.allowed_commands)
+        
+        # Dynamically append docs only if the tool is in the allowlist
+        docs = [
+            desc for cmd, desc in self.config.app.command_docs.items() 
+            if cmd in self.config.app.allowed_commands
+        ]
+        custom_docs = "\n\nCUSTOM COMMAND USAGE:\n" + "\n".join(docs) if docs else ""
+        
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Executes a shell command on the user's system. "
+                    f"STRICT ALLOWLIST - You are ONLY permitted to use these base commands: {allowed_list}. "
+                    "SECURITY RESTRICTION: Do not use shell operators (|, &, ;, <, >, $, `). "
+                    "Chaining and redirection are completely disabled and will cause the command to fail."
+                    f"{custom_docs}"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The exact command to execute."
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
+        }
+
+    def format_approval(self, args: dict) -> str:
+        return args.get("command", "")
+
+    async def execute(self, args: dict) -> tuple[str, str]:
+        command = args.get("command", "")
+        is_secure, error_msg, parsed_cmd = validate_command(command, self.config.app.allowed_commands)
+        
+        if not is_secure:
+            return f"Security Policy Violation: {error_msg}", f"**Command Blocked (Security):**\n```\n{error_msg}\n```"
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *parsed_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode()
+            if stderr:
+                output += f"\n[STDERR]\n{stderr.decode()}"
+        except Exception as e:
+            output = f"Error executing command: {str(e)}"
+
+        if not output.strip():
+            output = "Command executed successfully with no output."
+
+        return output, f"**Command Result:**\n```\n{output}\n```"
+
+
+class EditFileTool(BaseTool):
+    name = "edit_file"
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": "Edit a file by replacing an exact search string with a new string.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to edit."
+                        },
+                        "search_string": {
+                            "type": "string",
+                            "description": "The exact block of text to search for. Must match the file contents perfectly including whitespace and indentation."
+                        },
+                        "replace_string": {
+                            "type": "string",
+                            "description": "The new block of text to replace it with."
+                        }
+                    },
+                    "required": ["file_path", "search_string", "replace_string"]
+                }
+            }
+        }
+
+    def format_approval(self, args: dict) -> str:
+        return (
+            f"File: {args.get('file_path')}\n"
+            f"--- SEARCH ---\n{args.get('search_string')}\n"
+            f"--- REPLACE ---\n{args.get('replace_string')}"
+        )
+
+    async def execute(self, args: dict) -> tuple[str, str]:
+        file_path = args.get("file_path", "")
+        search_str = args.get("search_string", "")
+        replace_str = args.get("replace_string", "")
+
+        try:
+            p = Path(file_path)
+            if not p.exists():
+                raise FileNotFoundError("File does not exist.")
+
+            content = p.read_text(encoding="utf-8")
+            if search_str not in content:
+                raise ValueError("Exact search string not found in the file.")
+
+            # Replace only the first occurrence to avoid accidental overwrites
+            new_content = content.replace(search_str, replace_str, 1)
+            p.write_text(new_content, encoding="utf-8")
+
+            return f"Successfully edited {file_path}.", f"**File Edited Successfully:** `{file_path}`"
+        except Exception as e:
+            return f"Error editing file: {str(e)}", f"**Edit Failed:**\n```\n{e}\n```"
+
+class CreateFileTool(BaseTool):
+    name = "create_file"
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": "Create a new file with the specified text content.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path where the file should be created."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The text content to write into the new file."
+                        }
+                    },
+                    "required": ["file_path", "content"]
+                }
+            }
+        }
+
+    def format_approval(self, args: dict) -> str:
+        return (
+            f"Create File: {args.get('file_path')}\n"
+            f"--- CONTENT ---\n{args.get('content')}"
+        )
+
+    async def execute(self, args: dict) -> tuple[str, str]:
+        file_path = args.get("file_path", "")
+        content = args.get("content", "")
+
+        try:
+            p = Path(file_path)
+            
+            if p.exists():
+                raise FileExistsError("File already exists. Use edit_file instead.")
+                
+            # Automatically create parent directories if they don't exist
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+
+            return f"Successfully created {file_path}.", f"**File Created Successfully:** `{file_path}`"
+        except Exception as e:
+            return f"Error creating file: {str(e)}", f"**Creation Failed:**\n```\n{e}\n```"
+
+class ToolRegistry:
+    def __init__(self, config: Config):
+        self.tools: dict[str, BaseTool] = {}
+        # Register core tools
+        self.register(ExecuteCommandTool(config))
+        self.register(EditFileTool())
+        self.register(CreateFileTool())
+
+    def register(self, tool: BaseTool) -> None:
+        self.tools[tool.name] = tool
+
+    def get_schemas(self) -> list[dict]:
+        return [tool.get_schema() for tool in self.tools.values()]
+
+    def get_tool(self, name: str) -> BaseTool | None:
+        return self.tools.get(name)

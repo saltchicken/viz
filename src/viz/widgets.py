@@ -10,6 +10,8 @@ from textual.widgets import Label
 from textual.widgets import Markdown
 from textual.widgets import Static
 
+from viz.services import ToolRegistry
+
 
 class CommandApproval(Vertical):
     """Widget to ask user for command execution approval."""
@@ -42,10 +44,11 @@ class CommandApproval(Vertical):
     }
     """
 
-    def __init__(self, tool_call: dict, **kwargs) -> None:
+    def __init__(self, tool_call: dict, tool_registry: ToolRegistry, **kwargs) -> None:
         super().__init__(**kwargs)
         self.tool_call = tool_call
         self.tool_name = tool_call.get("function", {}).get("name", "unknown")
+        self.tool_registry = tool_registry
 
         args = tool_call.get("function", {}).get("arguments", {})
         if isinstance(args, str):
@@ -59,18 +62,15 @@ class CommandApproval(Vertical):
         yield Label(f"⚠️ The AI wants to use a tool: {self.tool_name}",
                     classes="cmd-title")
 
-        # Format the display block based on which tool the agent called
-        if self.tool_name == "execute_command":
-            display_text = self.args.get("command", "")
-        elif self.tool_name == "edit_file":
-            display_text = (
-                f"File: {self.args.get('file_path')}\n"
-                f"--- SEARCH ---\n{self.args.get('search_string')}\n"
-                f"--- REPLACE ---\n{self.args.get('replace_string')}")
+        # Dynamically fetch formatting from the tool itself
+        tool = self.tool_registry.get_tool(self.tool_name)
+        if tool:
+            display_text = tool.format_approval(self.args)
         else:
             display_text = json.dumps(self.args, indent=2)
 
         yield Static(display_text, classes="cmd-code")
+        
         with Horizontal(classes="cmd-buttons"):
             yield Button("Decline", id="btn-decline-cmd", variant="error")
             yield Button("Accept & Run", id="btn-accept-cmd", variant="success")
