@@ -397,7 +397,6 @@ class OllamaVisionApp(App):
             ]
             msg_entry["_source_paths"] = new_images
             self.sent_images.update(new_images)
-            self.prompt_label.update("Follow-up Question:")
 
         return msg_entry
 
