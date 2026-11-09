@@ -103,13 +103,11 @@ ChatMessage {
 }
 
 .user-msg {
-    background: $boost;
-    border-left: thick $primary;
+    background: #262B33;
 }
 
 .assistant-msg {
-    background: $surface;
-    border-left: thick $success;
+    background: #1E2329;
 }
 
 .md-view-container {
@@ -175,6 +173,5 @@ DebugModal {
 
 /* Styling for system/tool message results */
 .tool-msg {
-    background: $surface;
-    border-left: thick $warning;
+    background: #242931;
 }
