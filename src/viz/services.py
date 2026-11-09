@@ -1,9 +1,105 @@
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 
 from viz.config import Config
+
+
+class SessionManager:
+    """Manages automatic saving and loading of text-only conversation sessions."""
+
+    def __init__(self, config: Config) -> None:
+        self.history_dir = Path(config.app.history_dir).expanduser().resolve()
+        self.history_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_session_id(self) -> str:
+        return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+    def save_session(
+        self,
+        session_id: str,
+        model: str,
+        messages: list[dict],
+        system_prompt: str = "",
+        num_ctx: int = 32768,
+    ) -> Path | None:
+        if not messages:
+            return None
+
+        clean_messages = []
+        for msg in messages:
+            # Strip base64 images and internal private tracking fields (e.g., _source_paths)
+            clean_msg = {
+                k: v
+                for k, v in msg.items()
+                if not k.startswith("_") and k != "images"
+            }
+            # Preserve a lightweight note in the UI message dict if images were originally attached
+            if "images" in msg:
+                clean_msg["had_images"] = len(msg["images"])
+            clean_messages.append(clean_msg)
+
+        title = "Untitled Session"
+        for m in clean_messages:
+            if m.get("role") == "user" and m.get("content"):
+                raw_title = m["content"].strip().splitlines()[0]
+                title = (raw_title[:60] + "...") if len(raw_title) > 60 else raw_title
+                break
+
+        file_path = self.history_dir / f"session_{session_id}.json"
+        created_at = datetime.now().isoformat(timespec="seconds")
+        if file_path.exists():
+            try:
+                existing = json.loads(file_path.read_text(encoding="utf-8"))
+                created_at = existing.get("created_at", created_at)
+            except Exception:
+                pass
+
+        payload = {
+            "id": session_id,
+            "title": title,
+            "model": model,
+            "created_at": created_at,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "system_prompt": system_prompt,
+            "num_ctx": num_ctx,
+            "messages": clean_messages,
+        }
+
+        file_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return file_path
+
+    def list_sessions(self) -> list[dict]:
+        sessions = []
+        for p in self.history_dir.glob("session_*.json"):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                data["_path"] = p
+                sessions.append(data)
+            except Exception:
+                continue
+
+        sessions.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
+        return sessions
+
+    def load_session(self, path: Path) -> dict | None:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def delete_session(self, path: Path) -> bool:
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except Exception:
+            return False
 
 
 def _build_ollama_payload(model: str,

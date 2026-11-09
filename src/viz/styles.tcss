@@ -178,6 +178,34 @@ DebugModal {
     border: solid $secondary;
 }
 
+/* SessionSelectModal */
+SessionSelectModal {
+    align: center middle;
+}
+
+#session-dialog {
+    width: 80%;
+    height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#session-list {
+    height: 1fr;
+    border: solid $secondary;
+    margin: 1 0;
+}
+
+#session-meta-label {
+    height: 2;
+    color: $text-muted;
+}
+
+SessionSelectModal Button {
+    margin-left: 1;
+}
+
 /* Styling for system/tool message results */
 .tool-msg {
     background: #242931;

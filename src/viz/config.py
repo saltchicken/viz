@@ -14,6 +14,7 @@ else:
 class AppSettings:
     default_model: str = "qwen3.8:27b"
     default_context: int = 32768
+    history_dir: str = "~/.local/share/viz/sessions"
     required_commands: list[str] = field(
         default_factory=lambda: ["grim", "slurp", "wl-paste"])
     allowed_commands: list[str] = field(

@@ -26,6 +26,8 @@ from textual_image.widget import Image as TextualImage
 from viz.config import Config
 from viz.modals import DebugModal
 from viz.modals import FileSelectModal
+from viz.modals import SessionSelectModal
+from viz.services import SessionManager
 from viz.services import stream_ollama_chat_async
 from viz.tools import ToolRegistry
 from viz.widgets import ChatMessage
@@ -39,6 +41,7 @@ class OllamaVisionApp(App):
     BINDINGS = [
         ("ctrl+enter", "ask_ollama", "Ask / Send"),
         ("ctrl+o", "toggle_view", "Toggle View"),
+        ("ctrl+l", "load_session", "Sessions"),
         ("ctrl+2", "toggle_md_view", "Toggle MD"),
         ("ctrl+1", "show_debug", "Debug API"),
         ("escape", "cancel_stream", "Cancel"),
@@ -52,6 +55,8 @@ class OllamaVisionApp(App):
         self.title = f"Ollama Vision ({self.model})"
         self.workspace = ImageWorkspace(self.config)
         self.tool_registry = ToolRegistry(self.config)
+        self.session_manager = SessionManager(self.config)
+        self.session_id: str = self.session_manager.create_session_id()
 
         self.messages: list[dict] = []
         self.sent_images: set[Path] = set()
@@ -141,6 +146,7 @@ class OllamaVisionApp(App):
                     id="btn-ask",
                     variant="success",
                 )
+                yield Button("Load Chat", id="btn-load", variant="primary")
                 yield Button("Reset Chat", id="btn-reset", variant="error")
 
     def _compose_chat_panel(self) -> ComposeResult:
@@ -162,6 +168,29 @@ class OllamaVisionApp(App):
         self.update_preview()
         self._set_view("prep")
         self.prompt_input.focus()
+
+    def _auto_save_session(self) -> None:
+        """Automatically saves the current conversation state (text-only) to disk."""
+        if not self.messages:
+            return
+
+        raw_sys_val = self.query_one("#system-select", Select).value
+        system_prompt = "" if raw_sys_val == Select.BLANK else str(raw_sys_val)
+
+        ctx_val = self.query_one("#ctx-input", Input).value
+        num_ctx = (
+            int(ctx_val)
+            if ctx_val.isdigit()
+            else self.config.app.default_context
+        )
+
+        self.session_manager.save_session(
+            session_id=self.session_id,
+            model=self.model,
+            messages=self.messages,
+            system_prompt=system_prompt,
+            num_ctx=num_ctx,
+        )
 
     def action_toggle_md_view(self) -> None:
         self.md_enabled = not self.md_enabled
@@ -237,11 +266,87 @@ class OllamaVisionApp(App):
         self.update_preview()
         self.notify("Cleared attached images.")
 
+    @on(Button.Pressed, "#btn-load")
+    def action_load_session(self) -> None:
+        """Opens the modal to browse and load saved sessions."""
+        self.push_screen(
+            SessionSelectModal(self.session_manager),
+            self._on_session_selected,
+        )
+
+    async def _on_session_selected(self, session_data: dict | None) -> None:
+        if not session_data:
+            return
+
+        if self.active_worker and self.active_worker.is_running:
+            await self.action_cancel_stream()
+
+        self.session_id = session_data.get(
+            "id", self.session_manager.create_session_id()
+        )
+        loaded_messages = session_data.get("messages", [])
+        self.messages = []
+        self.sent_images.clear()
+
+        # Restore context size if saved
+        if "num_ctx" in session_data:
+            self.query_one("#ctx-input", Input).value = str(
+                session_data["num_ctx"]
+            )
+
+        # Restore system preset if it matches an available option
+        saved_sys = session_data.get("system_prompt", "")
+        sys_select = self.query_one("#system-select", Select)
+        valid_sys_values = {val for _, val in self.config.system_presets}
+        if saved_sys in valid_sys_values:
+            sys_select.value = saved_sys
+        elif not saved_sys:
+            sys_select.value = Select.BLANK
+
+        await self.chat_scroll.remove_children()
+
+        css_map = {
+            "user": "user-msg",
+            "assistant": "assistant-msg",
+            "tool": "tool-msg",
+        }
+
+        for msg in loaded_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            tool_calls = msg.get("tool_calls")
+
+            # Clean metadata key before appending to active conversation state
+            clean_msg: dict = {"role": role, "content": content}
+            if tool_calls:
+                clean_msg["tool_calls"] = tool_calls
+            self.messages.append(clean_msg)
+
+            if content or role != "assistant":
+                self._mount_chat_message(
+                    content,
+                    role=role,
+                    css_class=css_map.get(role, "user-msg"),
+                    animate=False,
+                )
+
+        # If the last message in the saved session had unresolved tool calls, mount their approval widgets
+        if self.messages and self.messages[-1].get("tool_calls"):
+            for tc in self.messages[-1]["tool_calls"]:
+                approval = CommandApproval(
+                    tool_call=tc, tool_registry=self.tool_registry
+                )
+                self.chat_scroll.mount(approval)
+
+        self._set_view("chat")
+        self.notify(f"Loaded session: {session_data.get('title', self.session_id)}")
+
     @on(Button.Pressed, "#btn-reset")
     async def handle_reset(self) -> None:
         if self.active_worker and self.active_worker.is_running:
             await self.action_cancel_stream()
 
+        self.session_id = self.session_manager.create_session_id()
         self.messages.clear()
         self.sent_images.clear()
         await self.chat_scroll.remove_children()
@@ -250,7 +355,7 @@ class OllamaVisionApp(App):
                 "Chat reset. Attach images and ask a question.",
                 id="empty-chat-hint",
             ))
-        self.notify("Conversation history cleared.")
+        self.notify("Started a new conversation session.")
 
     @on(Button.Pressed, "#btn-ask")
     async def action_ask_ollama(self) -> None:
@@ -268,6 +373,8 @@ class OllamaVisionApp(App):
             hint.remove()
 
         self.messages.append(self._build_user_message(prompt))
+        self._auto_save_session()
+
         self.last_user_msg_widget = self._mount_chat_message(
             prompt,
             role="user",
@@ -328,6 +435,7 @@ class OllamaVisionApp(App):
                     "role": "assistant",
                     "content": self.streaming_msg_widget.raw_text.strip()
                 })
+                self._auto_save_session()
             else:
                 self.streaming_msg_widget.remove()
                 if self.last_user_msg_widget is not None:
@@ -337,6 +445,7 @@ class OllamaVisionApp(App):
                     if "_source_paths" in popped:
                         self.sent_images.difference_update(
                             popped["_source_paths"])
+                    self._auto_save_session()
 
             self.streaming_msg_widget = None
             self.last_user_msg_widget = None
@@ -518,6 +627,8 @@ class OllamaVisionApp(App):
             assistant_msg["tool_calls"] = tool_calls
 
         self.messages.append(assistant_msg)
+        self._auto_save_session()
+
         self.streaming_msg_widget = None
         self.last_user_msg_widget = None
 
@@ -543,6 +654,7 @@ class OllamaVisionApp(App):
             "role": "tool",
             "content": internal_content,
         })
+        self._auto_save_session()
 
         self._mount_chat_message(
             display_text,

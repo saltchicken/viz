@@ -1,5 +1,6 @@
 [app]
 default_model = "qwen3.8:27b"
+history_dir = "~/.local/share/viz/sessions"
 required_commands = ["grim", "slurp", "wl-paste"]
 allowed_commands = ["ls", "cat", "echo", "pwd", "grep", "head", "tail", "wc"]
 
