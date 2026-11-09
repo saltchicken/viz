@@ -36,16 +36,6 @@ App {
     margin-bottom: 1;
 }
 
-#chat-header {
-    height: 3;
-    margin-bottom: 1;
-}
-
-#chat-header-title {
-    width: 1fr;
-    content-align: left middle;
-}
-
 #preview-state {
     height: auto;
     color: $text-muted;

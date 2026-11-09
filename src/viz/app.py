@@ -151,13 +151,6 @@ class OllamaVisionApp(App):
 
     def _compose_chat_panel(self) -> ComposeResult:
         with Vertical(id="chat-panel"):
-            with Horizontal(id="chat-header"):
-                yield Label(
-                    "Conversation History",
-                    id="chat-header-title",
-                    classes="section-title",
-                )
-
             with VerticalScroll(id="chat-scroll"):
                 yield Static(
                     "Attach images and enter a prompt on the left to start chatting.",
