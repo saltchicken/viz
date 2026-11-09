@@ -26,11 +26,11 @@ from textual_image.widget import Image as TextualImage
 from viz.config import Config
 from viz.modals import DebugModal
 from viz.modals import FileSelectModal
-from viz.services import ImageWorkspace
 from viz.services import stream_ollama_chat_async
-from viz.services import ToolRegistry
+from viz.tools import ToolRegistry
 from viz.widgets import ChatMessage
 from viz.widgets import CommandApproval
+from viz.workspace import ImageWorkspace
 
 
 class OllamaVisionApp(App):

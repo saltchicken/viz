@@ -96,7 +96,7 @@ App {
 /* Chat Message Widgets */
 ChatMessage {
     height: auto;
-    max-height: 15;
+    max-height: 25;
     padding: 1;
     margin-bottom: 1;
     overflow-y: auto;

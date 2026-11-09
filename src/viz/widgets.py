@@ -11,7 +11,7 @@ from textual.widgets import Label
 from textual.widgets import Markdown
 from textual.widgets import Static
 
-from viz.services import ToolRegistry
+from viz.tools import ToolRegistry
 
 
 class CommandApproval(Vertical):
