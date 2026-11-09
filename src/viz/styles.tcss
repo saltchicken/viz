@@ -30,17 +30,7 @@ App {
     padding: 1;
 }
 
-.section-title {
-    text-style: bold;
-    color: $accent;
-    margin-bottom: 1;
-}
 
-#preview-state {
-    height: auto;
-    color: $text-muted;
-    margin-bottom: 1;
-}
 
 #preview-image {
     height: 14;

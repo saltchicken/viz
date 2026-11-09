@@ -101,8 +101,6 @@ class OllamaVisionApp(App):
 
     def _compose_prep_panel(self) -> ComposeResult:
         with Vertical(id="prep-panel"):
-            yield Label("Prepare Vision Prompt", classes="section-title")
-            yield Static("No Images Captured", id="preview-state")
             yield TextualImage(id="preview-image")
 
             with Horizontal(classes="btn-row"):
@@ -193,19 +191,14 @@ class OllamaVisionApp(App):
     def update_preview(self) -> None:
         png_files = self.workspace.get_attached_images()
         count = len(png_files)
-        state_label = self.query_one("#preview-state", Static)
         img_widget = self.query_one("#preview-image", TextualImage)
 
         if count == 0:
-            state_label.update(
-                "Images Attached: [b]0[/b] — Click 'Capture', 'Paste', or 'Add File'"
-            )
             img_widget.image = None
             img_widget.display = False
             self.sub_title = "0 images attached"
             return
 
-        state_label.update(f"Images Attached: [b]{count}[/b]")
         img_widget.display = True
         self.sub_title = f"{count} image(s) attached"
         img_widget.image = self.workspace.build_preview()
