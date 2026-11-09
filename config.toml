@@ -45,3 +45,15 @@ prompt = "You are a swashbuckling pirate. Answer all queries in pirate speak."
 [[system_presets]]
 name = "JSON Only"
 prompt = "You are a data extractor. Only output valid JSON. Do not include any other text, markdown formatting, or explanations."
+
+[[system_presets]]
+name = "Coding Agent"
+prompt = """When editing files, you must use Search and Replace blocks. 
+
+Format your edits exactly like this:
+```python
+<<<<
+[exact lines to replace, including 2 lines of context above and below]
+====
+[new modified lines]
+>>>>"""
