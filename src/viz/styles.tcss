@@ -66,6 +66,7 @@ App {
 
 .btn-row Button {
     width: 1fr;
+    height: 3;
     margin-right: 1;
 }
 
@@ -88,7 +89,7 @@ App {
 
 #chat-scroll {
     height: 1fr;
-    border: solid $secondary;
+    border: none;
     padding: 1;
     margin-bottom: 1;
 }
