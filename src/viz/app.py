@@ -42,6 +42,7 @@ class OllamaVisionApp(App):
         ("ctrl+o", "toggle_view", "Toggle View"),
         ("ctrl+2", "toggle_md_view", "Toggle MD"),
         ("ctrl+1", "show_debug", "Debug API"),
+        ("escape", "cancel_stream", "Cancel"),
         ("ctrl+q", "quit", "Quit"),
     ]
 
@@ -168,7 +169,6 @@ class OllamaVisionApp(App):
         self.md_enabled = not self.md_enabled
         for msg in self.query(ChatMessage):
             msg.toggle_view(self.md_enabled)
-        self.notify(f"View: {'Markdown' if self.md_enabled else 'Raw'}")
 
     def update_preview(self) -> None:
         png_files = self.workspace.get_attached_images()
